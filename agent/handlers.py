@@ -229,9 +229,13 @@ def handle_obsidian_log(payload: dict, obsidian_cfg: dict) -> dict:
             resp.read()
 
     def _patch(body: bytes):
+        # Obsidian Local REST API v2: requires Target-Type + Heading + Operation
         r = _req.Request(url, data=body, method="PATCH",
                          headers={"Authorization": f"Bearer {token}",
-                                  "Content-Type": "text/markdown"})
+                                  "Content-Type": "text/markdown",
+                                  "Target-Type": "heading",
+                                  "Heading": note,
+                                  "Operation": "append"})
         with _req.urlopen(r, timeout=5, context=ctx) as resp:
             resp.read()
 
