@@ -16,5 +16,11 @@
   "openai_api_key": "",
   "qdrant_url": "",
   "qdrant_api_key": "",
-  "qdrant_collection": "dispatch_memory"
+  "qdrant_collection": "dispatch_memory",
+  "obsidian": {
+    "host": "http://localhost:27123",
+    "token": "YOUR_OBSIDIAN_LOCAL_REST_TOKEN",
+    "note": "claude97",
+    "vault": ""
+  }
 }

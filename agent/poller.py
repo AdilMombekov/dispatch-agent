@@ -66,7 +66,7 @@ class Poller:
 
             if command:
                 self._set_status("active")
-                self._execute(command, url, token, cfg.get("apps", {}))
+                self._execute(command, url, token, cfg.get("apps", {}), cfg.get("obsidian", {}))
                 sleep = interval_active
             else:
                 self._set_status("idle")
@@ -108,12 +108,12 @@ class Poller:
 
     # ── Execute & post result ─────────────────────────────────────────────
 
-    def _execute(self, command: dict, url: str, token: str, apps: dict):
+    def _execute(self, command: dict, url: str, token: str, apps: dict, obsidian_cfg: dict | None = None):
         command_id = command.get("command_id", "")
         chat_id = command.get("chat_id", "")
 
         try:
-            result = dispatch(command, apps)
+            result = dispatch(command, apps, obsidian_cfg or {})
         except Exception as e:
             result = {"success": False, "data": None, "error": str(e)}
 

@@ -1,36 +1,100 @@
 {
   "name": "Dispatch Agent v2",
   "nodes": [
-
     {
-      "parameters": { "updates": ["message", "callback_query"], "additionalFields": {} },
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
       "id": "telegram-trigger",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1,
-      "position": [0, 450],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        0,
+        450
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "rules": {
           "values": [
             {
-              "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.callback_query !== undefined }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] },
-              "renameOutput": true, "outputKey": "callback"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_query !== undefined }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "callback"
             },
             {
-              "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.message?.text?.startsWith('/') }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] },
-              "renameOutput": true, "outputKey": "command"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message?.text?.startsWith('/') }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "command"
             },
             {
-              "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.message?.voice !== undefined }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] },
-              "renameOutput": true, "outputKey": "voice"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message?.voice !== undefined }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "voice"
             },
             {
-              "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.message?.text !== undefined }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] },
-              "renameOutput": true, "outputKey": "text"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message?.text !== undefined }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "text"
             }
           ]
         },
@@ -40,59 +104,120 @@
       "name": "Router",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [260, 450]
+      "position": [
+        260,
+        450
+      ]
     },
-
     {
       "parameters": {
-        "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `✅ Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '❌ Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '✅ Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `💰 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
+        "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `\u0432\u045a\u2026 Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045c\u040a Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045a\u2026 Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '\u0432\u2013\u20ac'.repeat(filled) + '\u0432\u2013\u2018'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `\u0440\u045f\u2019\u00b0 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
       },
       "id": "command-handler",
       "name": "Command Handler",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 200]
+      "position": [
+        520,
+        200
+      ]
     },
-
     {
       "parameters": {
-        "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.replyType }}", "rightValue": "info", "operator": { "type": "string", "operation": "equals" } }] }
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.replyType }}",
+              "rightValue": "info",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
       },
       "id": "command-router",
       "name": "Command Router",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [780, 200]
+      "position": [
+        780,
+        200
+      ]
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.replyText }}",
-        "additionalFields": { "parse_mode": "Markdown" }
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
       },
       "id": "send-command-reply",
       "name": "Send Command Reply",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1040, 120],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1040,
+        120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
-        "text": "🤖 *Dispatch Agent*\nControl your PC remotely\n\n/spend — usage report\n/setlimit 10 — change limit\n/resetspend — reset counter",
+        "text": "\u0440\u045f\u00a4\u2013 *Dispatch Agent*\nControl your PC remotely\n\n/spend \u0432\u0402\u201d usage report\n/setlimit 10 \u0432\u0402\u201d change limit\n/resetspend \u0432\u0402\u201d reset counter",
         "additionalFields": {
           "parse_mode": "Markdown",
           "reply_markup": {
             "inline_keyboard": [
-              [{ "text": "📸 Screenshot", "callback_data": "cmd:screenshot" }, { "text": "💻 System Info", "callback_data": "cmd:system-info" }],
-              [{ "text": "🌐 Chrome Profiles", "callback_data": "menu:chrome" }],
-              [{ "text": "🚀 Launch App", "callback_data": "menu:apps" }],
-              [{ "text": "💻 Terminal", "callback_data": "menu:terminal" }],
-              [{ "text": "📦 Install Software", "callback_data": "menu:install" }],
-              [{ "text": "🔑 Switch Claude Account", "callback_data": "menu:accounts" }]
+              [
+                {
+                  "text": "\u0440\u045f\u201c\u0451 Screenshot",
+                  "callback_data": "cmd:screenshot"
+                },
+                {
+                  "text": "\u0440\u045f\u2019\u00bb System Info",
+                  "callback_data": "cmd:system-info"
+                }
+              ],
+              [
+                {
+                  "text": "\u0440\u045f\u040a\u0452 Chrome Profiles",
+                  "callback_data": "menu:chrome"
+                }
+              ],
+              [
+                {
+                  "text": "\u0440\u045f\u0459\u0402 Launch App",
+                  "callback_data": "menu:apps"
+                }
+              ],
+              [
+                {
+                  "text": "\u0440\u045f\u2019\u00bb Terminal",
+                  "callback_data": "menu:terminal"
+                }
+              ],
+              [
+                {
+                  "text": "\u0440\u045f\u201c\u00a6 Install Software",
+                  "callback_data": "menu:install"
+                }
+              ],
+              [
+                {
+                  "text": "\u0440\u045f\u201d\u2018 Switch Claude Account",
+                  "callback_data": "menu:accounts"
+                }
+              ]
             ]
           }
         }
@@ -101,10 +226,17 @@
       "name": "Main Menu",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1040, 280],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1040,
+        280
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "jsCode": "const cb = $input.first().json.callback_query;\nconst chatId = cb.message.chat.id;\nconst data = cb.data;\nconst callbackQueryId = cb.id;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.command_queue) sd.command_queue = [];\n\nconst enqueue = (cmd) => {\n  if (sd.command_queue.length >= 50) sd.command_queue.shift();\n  sd.command_queue.push(cmd);\n};\n\nlet action = null, replyMenu = null;\n\nif (data.startsWith('cmd:')) {\n  const type = data.slice(4);\n  enqueue({ command_id: require('crypto').randomUUID(), chat_id: String(chatId), type, payload: {} });\n  action = 'queued';\n} else if (data.startsWith('app:')) {\n  enqueue({ command_id: require('crypto').randomUUID(), chat_id: String(chatId), type: 'launch-app', payload: { app: data.slice(4) } });\n  action = 'queued';\n} else if (data.startsWith('chrome:')) {\n  enqueue({ command_id: require('crypto').randomUUID(), chat_id: String(chatId), type: 'chrome-profile', payload: { profile_directory: data.slice(7) } });\n  action = 'queued';\n} else if (data === 'menu:apps') { replyMenu = 'apps'; action = 'show_menu';\n} else if (data === 'menu:chrome') {\n  enqueue({ command_id: require('crypto').randomUUID(), chat_id: String(chatId), type: 'chrome-profiles-list', payload: {} });\n  replyMenu = 'chrome'; action = 'show_menu';\n} else if (data === 'menu:accounts') { replyMenu = 'accounts'; action = 'show_menu';\n} else if (data === 'menu:terminal') { action = 'ask_terminal';\n} else if (data === 'menu:install') { action = 'ask_install';\n} else if (data.startsWith('account:')) {\n  sd.active_account = parseInt(data.slice(8));\n  action = 'account_switched';\n}\n\nreturn [{ json: { chatId, callbackQueryId, action, replyMenu, active_account: sd.active_account || 1 } }];"
@@ -113,47 +245,69 @@
       "name": "Callback Handler",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 380]
+      "position": [
+        520,
+        380
+      ]
     },
-
     {
       "parameters": {
-        "jsCode": "const { chatId, callbackQueryId, action, replyMenu, active_account } = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nlet text = '', replyMarkup = null;\n\nif (action === 'queued') { text = '⏳ Command queued…';\n} else if (action === 'account_switched') { text = `✅ Switched to Account ${active_account}`;\n} else if (action === 'ask_terminal') {\n  text = '💻 Send the terminal command as a message:';\n  if (!sd.pending) sd.pending = {};\n  sd.pending[String(chatId)] = { type: 'terminal' };\n} else if (action === 'ask_install') {\n  text = '📦 Send the download URL (.exe / .msi / .zip):';\n  if (!sd.pending) sd.pending = {};\n  sd.pending[String(chatId)] = { type: 'install' };\n} else if (replyMenu === 'apps') {\n  text = '🚀 Choose an app:';\n  replyMarkup = { inline_keyboard: [\n    [{ text: 'Cursor', callback_data: 'app:cursor' }, { text: 'VS Code', callback_data: 'app:vscode' }],\n    [{ text: 'Claude Code', callback_data: 'app:claude-code' }, { text: 'Antigravity', callback_data: 'app:antigravity' }],\n    [{ text: 'Terminal', callback_data: 'app:terminal' }]\n  ]};\n} else if (replyMenu === 'chrome') {\n  const profiles = sd.chrome_profiles || [];\n  if (profiles.length === 0) { text = '🌐 Fetching profiles… retry in a moment.'; }\n  else { text = '🌐 Chrome Profiles:'; replyMarkup = { inline_keyboard: profiles.map(p => [{ text: p.display, callback_data: `chrome:${p.directory}` }]) }; }\n} else if (replyMenu === 'accounts') {\n  const active = active_account || 1;\n  text = `🔑 Select Claude Account (active: #${active}):`;\n  replyMarkup = { inline_keyboard: [\n    [{ text: `Account 1 ${active===1?'✓':''}`, callback_data: 'account:1' }],\n    [{ text: `Account 2 ${active===2?'✓':''}`, callback_data: 'account:2' }],\n    [{ text: `Account 3 ${active===3?'✓':''}`, callback_data: 'account:3' }]\n  ]};\n}\nreturn [{ json: { chatId, callbackQueryId, text, replyMarkup } }];"
+        "jsCode": "const { chatId, callbackQueryId, action, replyMenu, active_account } = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nlet text = '', replyMarkup = null;\n\nif (action === 'queued') { text = '\u0432\u040f\u0456 Command queued\u0432\u0402\u00a6';\n} else if (action === 'account_switched') { text = `\u0432\u045a\u2026 Switched to Account ${active_account}`;\n} else if (action === 'ask_terminal') {\n  text = '\u0440\u045f\u2019\u00bb Send the terminal command as a message:';\n  if (!sd.pending) sd.pending = {};\n  sd.pending[String(chatId)] = { type: 'terminal' };\n} else if (action === 'ask_install') {\n  text = '\u0440\u045f\u201c\u00a6 Send the download URL (.exe / .msi / .zip):';\n  if (!sd.pending) sd.pending = {};\n  sd.pending[String(chatId)] = { type: 'install' };\n} else if (replyMenu === 'apps') {\n  text = '\u0440\u045f\u0459\u0402 Choose an app:';\n  replyMarkup = { inline_keyboard: [\n    [{ text: 'Cursor', callback_data: 'app:cursor' }, { text: 'VS Code', callback_data: 'app:vscode' }],\n    [{ text: 'Claude Code', callback_data: 'app:claude-code' }, { text: 'Antigravity', callback_data: 'app:antigravity' }],\n    [{ text: 'Terminal', callback_data: 'app:terminal' }]\n  ]};\n} else if (replyMenu === 'chrome') {\n  const profiles = sd.chrome_profiles || [];\n  if (profiles.length === 0) { text = '\u0440\u045f\u040a\u0452 Fetching profiles\u0432\u0402\u00a6 retry in a moment.'; }\n  else { text = '\u0440\u045f\u040a\u0452 Chrome Profiles:'; replyMarkup = { inline_keyboard: profiles.map(p => [{ text: p.display, callback_data: `chrome:${p.directory}` }]) }; }\n} else if (replyMenu === 'accounts') {\n  const active = active_account || 1;\n  text = `\u0440\u045f\u201d\u2018 Select Claude Account (active: #${active}):`;\n  replyMarkup = { inline_keyboard: [\n    [{ text: `Account 1 ${active===1?'\u0432\u045a\u201c':''}`, callback_data: 'account:1' }],\n    [{ text: `Account 2 ${active===2?'\u0432\u045a\u201c':''}`, callback_data: 'account:2' }],\n    [{ text: `Account 3 ${active===3?'\u0432\u045a\u201c':''}`, callback_data: 'account:3' }]\n  ]};\n}\nreturn [{ json: { chatId, callbackQueryId, text, replyMarkup } }];"
       },
       "id": "build-reply",
       "name": "Build Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [780, 380]
+      "position": [
+        780,
+        380
+      ]
     },
-
     {
       "parameters": {
-        "resource": "callback", "operation": "answerQuery",
-        "queryId": "={{ $json.callbackQueryId }}", "additionalFields": {}
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $json.callbackQueryId }}",
+        "additionalFields": {}
       },
       "id": "answer-callback",
       "name": "Answer Callback",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1040, 380],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1040,
+        380
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.text }}",
-        "additionalFields": { "reply_markup": "={{ $json.replyMarkup ? JSON.stringify($json.replyMarkup) : undefined }}" }
+        "additionalFields": {
+          "reply_markup": "={{ $json.replyMarkup ? JSON.stringify($json.replyMarkup) : undefined }}"
+        }
       },
       "id": "send-callback-reply",
       "name": "Send Callback Reply",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1300, 380],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1300,
+        380
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "jsCode": "const msg = $input.first().json.message;\nconst voice = msg.voice;\nreturn [{ json: {\n  chatId: String(msg.chat.id),\n  fileId: voice.file_id,\n  duration: voice.duration || 0,\n  mimeType: voice.mime_type || 'audio/ogg'\n} }];"
@@ -162,42 +316,62 @@
       "name": "Voice Prepare",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 740]
+      "position": [
+        520,
+        740
+      ]
     },
-
     {
       "parameters": {
-        "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = process.env.TELEGRAM_BOT_TOKEN;\nconst openaiKey = process.env.OPENAI_API_KEY;\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received — OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
+        "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = process.env.TELEGRAM_BOT_TOKEN;\nconst openaiKey = process.env.OPENAI_API_KEY;\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received \u0432\u0402\u201d OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
       },
       "id": "voice-process",
       "name": "Voice Process",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [780, 740]
+      "position": [
+        780,
+        740
+      ]
     },
-
     {
       "parameters": {
-        "jsCode": "const msg = $input.first().json.message;\nconst chatId = String(msg.chat.id);\nconst text = msg.text;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.pending) sd.pending = {};\nif (!sd.history) sd.history = {};\n\nconst pending = sd.pending[chatId];\nif (pending) {\n  delete sd.pending[chatId];\n  const commandId = require('crypto').randomUUID();\n  if (!sd.command_queue) sd.command_queue = [];\n  let cmd;\n  if (pending.type === 'terminal') cmd = { command_id: commandId, chat_id: chatId, type: 'terminal', payload: { command: text } };\n  else if (pending.type === 'install') cmd = { command_id: commandId, chat_id: chatId, type: 'install', payload: { url: text } };\n  if (cmd) {\n    if (sd.command_queue.length >= 50) sd.command_queue.shift();\n    sd.command_queue.push(cmd);\n  }\n  return [{ json: { chatId, mode: 'queued', text: `⏳ ${pending.type} queued…` } }];\n}\n\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: text });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\nreturn [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: sd.active_account || 1 } }];"
+        "jsCode": "const msg = $input.first().json.message;\nconst chatId = String(msg.chat.id);\nconst text = msg.text;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.pending) sd.pending = {};\nif (!sd.history) sd.history = {};\n\nconst pending = sd.pending[chatId];\nif (pending) {\n  delete sd.pending[chatId];\n  const commandId = require('crypto').randomUUID();\n  if (!sd.command_queue) sd.command_queue = [];\n  let cmd;\n  if (pending.type === 'terminal') cmd = { command_id: commandId, chat_id: chatId, type: 'terminal', payload: { command: text } };\n  else if (pending.type === 'install') cmd = { command_id: commandId, chat_id: chatId, type: 'install', payload: { url: text } };\n  if (cmd) {\n    if (sd.command_queue.length >= 50) sd.command_queue.shift();\n    sd.command_queue.push(cmd);\n  }\n  return [{ json: { chatId, mode: 'queued', text: `\u0432\u040f\u0456 ${pending.type} queued\u0432\u0402\u00a6` } }];\n}\n\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: text });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\nreturn [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: sd.active_account || 1 } }];"
       },
       "id": "text-handler",
       "name": "Text Handler",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 560]
+      "position": [
+        520,
+        560
+      ]
     },
-
     {
       "parameters": {
-        "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json.mode }}", "rightValue": "queued", "operator": { "type": "string", "operation": "equals" } }] }
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "queued",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
       },
       "id": "text-router",
       "name": "Text Router",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [780, 560]
+      "position": [
+        780,
+        560
+      ]
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
@@ -208,10 +382,17 @@
       "name": "Send Queued Ack",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1040, 480],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1040,
+        480
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "jsCode": "// Check if under spend limit before AI call\nconst input = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nif (!sd.spend.limit_usd) sd.spend.limit_usd = parseFloat(process.env.API_LIMIT_USD || '5');\nconst underLimit = sd.spend.total_usd < sd.spend.limit_usd;\nreturn [{ json: { ...input, _underLimit: underLimit, _limitUsd: sd.spend.limit_usd, _spentUsd: sd.spend.total_usd } }];"
@@ -220,56 +401,85 @@
       "name": "Spend Check",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1040, 640]
+      "position": [
+        1040,
+        640
+      ]
     },
-
     {
       "parameters": {
-        "conditions": { "combinator": "and", "conditions": [{ "leftValue": "={{ $json._underLimit }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] }
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json._underLimit }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
       },
       "id": "spend-if",
       "name": "Spend If",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1300, 640]
+      "position": [
+        1300,
+        640
+      ]
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
-        "text": "=❌ *API spend limit reached*\nSpent: ${{ $json._spentUsd.toFixed(4) }} / ${{ $json._limitUsd.toFixed(2) }}\n\nUse /setlimit X to raise the limit or /resetspend to reset.",
-        "additionalFields": { "parse_mode": "Markdown" }
+        "text": "=\u0432\u045c\u040a *API spend limit reached*\nSpent: ${{ $json._spentUsd.toFixed(4) }} / ${{ $json._limitUsd.toFixed(2) }}\n\nUse /setlimit X to raise the limit or /resetspend to reset.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
       },
       "id": "send-limit-exceeded",
       "name": "Send Limit Exceeded",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1560, 540],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1560,
+        540
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
-        "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable — use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
+        "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable \u0432\u0402\u201d use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
       },
       "id": "qdrant-context",
       "name": "Qdrant Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 740]
+      "position": [
+        1560,
+        740
+      ]
     },
-
     {
       "parameters": {
-        "jsCode": "// Call Anthropic API, track spend, update history\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  process.env.ANTHROPIC_API_KEY_1,\n  process.env.ANTHROPIC_API_KEY_2,\n  process.env.ANTHROPIC_API_KEY_3\n][( activeAccount || 1) - 1] || process.env.ANTHROPIC_API_KEY_1;\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant for a Windows PC remote-control agent. Be concise. The user controls their PC via Telegram.',\n  messages\n});\n\nconst resp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst reply = resp.content?.[0]?.text || resp.error?.message || '(no response)';\nconst usage = resp.usage || { input_tokens: 0, output_tokens: 0 };\n\n// Track Anthropic cost (Haiku: in=$0.80/M, out=$4.00/M)\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// Save assistant reply to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'assistant', content: reply });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: { chatId, reply, inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost } }];"
+        "jsCode": "// Call Anthropic API, track spend, update history\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  process.env.ANTHROPIC_API_KEY_1,\n  process.env.ANTHROPIC_API_KEY_2,\n  process.env.ANTHROPIC_API_KEY_3\n][( activeAccount || 1) - 1] || process.env.ANTHROPIC_API_KEY_1;\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant for a Windows PC remote-control agent. Be concise. The user controls their PC via Telegram. You can queue agent commands by replying with JSON: {\"command\":{\"type\":\"obsidian-log\",\"payload\":{\"text\":\"...\"}}} to log to Obsidian note 'claude97', or {\"command\":{\"type\":\"obsidian-read\",\"payload\":{\"lines\":20}}} to read the log.',\n  messages\n});\n\nconst resp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst reply = resp.content?.[0]?.text || resp.error?.message || '(no response)';\nconst usage = resp.usage || { input_tokens: 0, output_tokens: 0 };\n\n// Track Anthropic cost (Haiku: in=$0.80/M, out=$4.00/M)\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// Save assistant reply to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'assistant', content: reply });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: { chatId, reply, inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost } }];"
       },
       "id": "anthropic-full",
       "name": "Anthropic Full",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1820, 740]
+      "position": [
+        1820,
+        740
+      ]
     },
-
     {
       "parameters": {
         "jsCode": "// Store this exchange in Qdrant for future semantic retrieval\nconst https = require('https');\nconst { chatId, reply } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nconst sd = $getWorkflowStaticData('global');\nconst history = sd.history?.[chatId] || [];\n// Get last user message (second-to-last item, since assistant reply was just appended)\nconst userMsg = [...history].reverse().find(m => m.role === 'user')?.content || '';\n\nif (qdrantUrl && openaiKey && userMsg && reply && reply !== '(no response)') {\n  try {\n    const exchangeText = `User: ${userMsg}\\nAssistant: ${reply}`;\n\n    function postJson(hostname, port, path, method, headers, body) {\n      const data = JSON.stringify(body);\n      return new Promise((resolve, reject) => {\n        const req = https.request({ hostname, port: port || 443, path, method, headers: {\n          ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n        }}, res => {\n          const chunks = [];\n          res.on('data', c => chunks.push(c));\n          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n          res.on('error', resolve);\n        });\n        req.on('error', resolve);\n        req.write(data); req.end();\n      });\n    }\n\n    // Embed the exchange\n    const embedResp = await postJson('api.openai.com', 443, '/v1/embeddings', 'POST',\n      { 'Authorization': `Bearer ${openaiKey}` },\n      { model: 'text-embedding-3-small', input: exchangeText }\n    );\n    const vector = embedResp.data?.[0]?.embedding;\n\n    if (vector) {\n      // Track embedding cost\n      if (sd.spend) {\n        const cost = Math.ceil(exchangeText.length / 4) / 1_000_000 * 0.02;\n        sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n        sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n      }\n\n      const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points`);\n      await postJson(\n        urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname, 'PUT',\n        qdrantKey ? { 'api-key': qdrantKey } : {},\n        { points: [{ id: Date.now(), vector, payload: {\n          chat_id: chatId, user_msg: userMsg, assistant_msg: reply, ts: new Date().toISOString()\n        }}] }\n      );\n    }\n  } catch (_) { /* silent fail */ }\n}\n\nreturn [{ json: { chatId, reply } }];"
@@ -278,9 +488,11 @@
       "name": "Qdrant Store",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2080, 740]
+      "position": [
+        2080,
+        740
+      ]
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
@@ -291,20 +503,34 @@
       "name": "Send AI Reply",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [2340, 740],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        2340,
+        740
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
-      "parameters": { "httpMethod": "GET", "path": "agent-poll", "responseMode": "responseNode", "options": {} },
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "agent-poll",
+        "responseMode": "responseNode",
+        "options": {}
+      },
       "id": "poll-webhook",
       "name": "Poll Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "webhookId": "agent-poll"
     },
-
     {
       "parameters": {
         "jsCode": "const req = $input.first().json;\nconst token = req.headers?.['x-agent-token'];\nif (token !== process.env.AGENT_TOKEN) {\n  return [{ json: { responseBody: JSON.stringify({ success: false, data: null, error: 'unauthorized' }) } }];\n}\nconst sd = $getWorkflowStaticData('global');\nif (!sd.command_queue) sd.command_queue = [];\nif (sd.command_queue.length > 50) sd.command_queue = sd.command_queue.slice(-50);\nlet cmd = {};\nif (sd.command_queue.length > 0) cmd = sd.command_queue.shift();\nreturn [{ json: { responseBody: JSON.stringify({ success: true, data: cmd, error: null }) } }];"
@@ -313,37 +539,58 @@
       "name": "Poll Handler",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [260, 0]
+      "position": [
+        260,
+        0
+      ]
     },
-
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ $json.responseBody }}", "options": {} },
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.responseBody }}",
+        "options": {}
+      },
       "id": "poll-respond",
       "name": "Poll Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [520, 0]
+      "position": [
+        520,
+        0
+      ]
     },
-
     {
-      "parameters": { "httpMethod": "POST", "path": "agent-result", "responseMode": "responseNode", "options": {} },
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-result",
+        "responseMode": "responseNode",
+        "options": {}
+      },
       "id": "result-webhook",
       "name": "Result Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 1000],
+      "position": [
+        0,
+        1000
+      ],
       "webhookId": "agent-result"
     },
-
     {
-      "parameters": { "respondWith": "json", "responseBody": "{\"success\": true, \"error\": null}", "options": {} },
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\": true, \"error\": null}",
+        "options": {}
+      },
       "id": "result-respond",
       "name": "Result Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [260, 1000]
+      "position": [
+        260,
+        1000
+      ]
     },
-
     {
       "parameters": {
         "jsCode": "const token = $input.first().json.headers?.['x-agent-token'];\nif (token !== process.env.AGENT_TOKEN) return [{ json: { authorized: false } }];\nconst body = $input.first().json.body;\nconst chatId = String(body.chat_id);\nconst commandType = body.command_type;\nconst result = body.result;\nconst sd = $getWorkflowStaticData('global');\nif (commandType === 'chrome-profiles-list' && result.success) sd.chrome_profiles = result.data;\nreturn [{ json: { authorized: true, chatId, commandType, result } }];"
@@ -352,26 +599,64 @@
       "name": "Process Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [520, 1000]
+      "position": [
+        520,
+        1000
+      ]
     },
-
     {
       "parameters": {
         "rules": {
           "values": [
             {
-              "conditions": { "combinator": "and", "conditions": [
-                { "leftValue": "={{ $json.commandType }}", "rightValue": "screenshot", "operator": { "type": "string", "operation": "equals" } },
-                { "leftValue": "={{ $json.result.success }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
-              ]},
-              "renameOutput": true, "outputKey": "screenshot"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandType }}",
+                    "rightValue": "screenshot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.result.success }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "screenshot"
             },
             {
-              "conditions": { "combinator": "and", "conditions": [
-                { "leftValue": "={{ $json.commandType }}", "rightValue": "terminal", "operator": { "type": "string", "operation": "equals" } },
-                { "leftValue": "={{ $json.result.success && $json.result.data?.send_as_file }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
-              ]},
-              "renameOutput": true, "outputKey": "terminal-file"
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandType }}",
+                    "rightValue": "terminal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.result.success && $json.result.data?.send_as_file }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "terminal-file"
             }
           ]
         },
@@ -381,9 +666,11 @@
       "name": "Result Router",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [780, 1000]
+      "position": [
+        780,
+        1000
+      ]
     },
-
     {
       "parameters": {
         "jsCode": "const item = $input.first().json;\nconst b64 = item.result.data.image;\nconst buffer = Buffer.from(b64, 'base64');\nconst binaryData = await this.helpers.prepareBinaryData(buffer, 'screenshot.jpg', 'image/jpeg');\nreturn [{ json: { chatId: item.chatId }, binary: { photo: binaryData } }];"
@@ -392,24 +679,35 @@
       "name": "Prepare Screenshot",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1040, 880]
+      "position": [
+        1040,
+        880
+      ]
     },
-
     {
       "parameters": {
-        "resource": "chat", "operation": "sendPhoto",
+        "resource": "chat",
+        "operation": "sendPhoto",
         "chatId": "={{ $json.chatId }}",
-        "binaryData": true, "binaryPropertyName": "photo",
+        "binaryData": true,
+        "binaryPropertyName": "photo",
         "additionalFields": {}
       },
       "id": "send-screenshot",
       "name": "Send Screenshot",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1300, 880],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1300,
+        880
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "jsCode": "const item = $input.first().json;\nconst data = item.result.data;\nconst buffer = Buffer.from(data.output_file_b64, 'base64');\nconst binaryData = await this.helpers.prepareBinaryData(buffer, data.filename || 'terminal_output.txt', 'text/plain');\nconst caption = `Exit code: ${data.returncode}`;\nreturn [{ json: { chatId: item.chatId, caption }, binary: { document: binaryData } }];"
@@ -418,98 +716,392 @@
       "name": "Prepare Terminal File",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1040, 1000]
+      "position": [
+        1040,
+        1000
+      ]
     },
-
     {
       "parameters": {
-        "resource": "chat", "operation": "sendDocument",
+        "resource": "chat",
+        "operation": "sendDocument",
         "chatId": "={{ $json.chatId }}",
-        "binaryData": true, "binaryPropertyName": "document",
-        "additionalFields": { "caption": "={{ $json.caption }}" }
+        "binaryData": true,
+        "binaryPropertyName": "document",
+        "additionalFields": {
+          "caption": "={{ $json.caption }}"
+        }
       },
       "id": "send-terminal-file",
       "name": "Send Terminal File",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1300, 1000],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1300,
+        1000
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     },
-
     {
       "parameters": {
         "chatId": "={{ $json.chatId }}",
-        "text": "={% if not $json.result.success %}\n❌ *{{ $json.commandType }}* failed: {{ $json.result.error }}\n{% elif $json.commandType === 'system-info' %}\n💻 *System Info*\nCPU: {{ $json.result.data.cpu_percent }}%\nRAM: {{ $json.result.data.ram_used_gb }}/{{ $json.result.data.ram_total_gb }} GB ({{ $json.result.data.ram_percent }}%)\nDisk C: {{ $json.result.data.disk_used_gb }}/{{ $json.result.data.disk_total_gb }} GB ({{ $json.result.data.disk_percent }}%)\n{% elif $json.commandType === 'terminal' %}\n```\n{{ $json.result.data.output | truncate(700) }}\n```\n`exit {{ $json.result.data.returncode }}`\n{% else %}\n✅ {{ $json.commandType }}: {{ $json.result.data | string | truncate(500) }}\n{% endif %}",
-        "additionalFields": { "parse_mode": "Markdown" }
+        "text": "={% if not $json.result.success %}\n\u0432\u045c\u040a *{{ $json.commandType }}* failed: {{ $json.result.error }}\n{% elif $json.commandType === 'system-info' %}\n\u0440\u045f\u2019\u00bb *System Info*\nCPU: {{ $json.result.data.cpu_percent }}%\nRAM: {{ $json.result.data.ram_used_gb }}/{{ $json.result.data.ram_total_gb }} GB ({{ $json.result.data.ram_percent }}%)\nDisk C: {{ $json.result.data.disk_used_gb }}/{{ $json.result.data.disk_total_gb }} GB ({{ $json.result.data.disk_percent }}%)\n{% elif $json.commandType === 'terminal' %}\n```\n{{ $json.result.data.output | truncate(700) }}\n```\n`exit {{ $json.result.data.returncode }}`\n{% else %}\n\u0432\u045a\u2026 {{ $json.commandType }}: {{ $json.result.data | string | truncate(500) }}\n{% endif %}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
       },
       "id": "send-result-text",
       "name": "Send Result Text",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1040, 1120],
-      "credentials": { "telegramApi": { "id": "cred-telegram", "name": "TELEGRAM_BOT_TOKEN" } }
+      "position": [
+        1040,
+        1120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      }
     }
-
   ],
-
   "connections": {
-    "Telegram Trigger":  { "main": [[{ "node": "Router", "type": "main", "index": 0 }]] },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Router": {
       "main": [
-        [{ "node": "Callback Handler", "type": "main", "index": 0 }],
-        [{ "node": "Command Handler",  "type": "main", "index": 0 }],
-        [{ "node": "Voice Prepare",    "type": "main", "index": 0 }],
-        [{ "node": "Text Handler",     "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Callback Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Command Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Voice Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Text Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Command Handler":   { "main": [[{ "node": "Command Router",     "type": "main", "index": 0 }]] },
+    "Command Handler": {
+      "main": [
+        [
+          {
+            "node": "Command Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Command Router": {
       "main": [
-        [{ "node": "Send Command Reply", "type": "main", "index": 0 }],
-        [{ "node": "Main Menu",          "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Send Command Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Main Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Callback Handler":  { "main": [[{ "node": "Build Reply",       "type": "main", "index": 0 }]] },
-    "Build Reply":       { "main": [[{ "node": "Answer Callback",   "type": "main", "index": 0 }]] },
-    "Answer Callback":   { "main": [[{ "node": "Send Callback Reply","type": "main", "index": 0 }]] },
-    "Voice Prepare":     { "main": [[{ "node": "Voice Process",     "type": "main", "index": 0 }]] },
-    "Voice Process":     { "main": [[{ "node": "Spend Check",       "type": "main", "index": 0 }]] },
-    "Text Handler":      { "main": [[{ "node": "Text Router",       "type": "main", "index": 0 }]] },
+    "Callback Handler": {
+      "main": [
+        [
+          {
+            "node": "Build Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Reply": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback": {
+      "main": [
+        [
+          {
+            "node": "Send Callback Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Prepare": {
+      "main": [
+        [
+          {
+            "node": "Voice Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Process": {
+      "main": [
+        [
+          {
+            "node": "Spend Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Handler": {
+      "main": [
+        [
+          {
+            "node": "Text Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Text Router": {
       "main": [
-        [{ "node": "Send Queued Ack", "type": "main", "index": 0 }],
-        [{ "node": "Spend Check",     "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Send Queued Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Spend Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Spend Check":       { "main": [[{ "node": "Spend If",          "type": "main", "index": 0 }]] },
+    "Spend Check": {
+      "main": [
+        [
+          {
+            "node": "Spend If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Spend If": {
       "main": [
-        [{ "node": "Qdrant Context",      "type": "main", "index": 0 }],
-        [{ "node": "Send Limit Exceeded", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Qdrant Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Limit Exceeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Qdrant Context":    { "main": [[{ "node": "Anthropic Full",    "type": "main", "index": 0 }]] },
-    "Anthropic Full":    { "main": [[{ "node": "Qdrant Store",      "type": "main", "index": 0 }]] },
-    "Qdrant Store":      { "main": [[{ "node": "Send AI Reply",     "type": "main", "index": 0 }]] },
-    "Poll Webhook":      { "main": [[{ "node": "Poll Handler",      "type": "main", "index": 0 }]] },
-    "Poll Handler":      { "main": [[{ "node": "Poll Respond",      "type": "main", "index": 0 }]] },
-    "Result Webhook":    { "main": [[{ "node": "Result Respond",    "type": "main", "index": 0 }]] },
-    "Result Respond":    { "main": [[{ "node": "Process Result",    "type": "main", "index": 0 }]] },
-    "Process Result":    { "main": [[{ "node": "Result Router",     "type": "main", "index": 0 }]] },
+    "Qdrant Context": {
+      "main": [
+        [
+          {
+            "node": "Anthropic Full",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Full": {
+      "main": [
+        [
+          {
+            "node": "Qdrant Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant Store": {
+      "main": [
+        [
+          {
+            "node": "Send AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Webhook": {
+      "main": [
+        [
+          {
+            "node": "Poll Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Handler": {
+      "main": [
+        [
+          {
+            "node": "Poll Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result Webhook": {
+      "main": [
+        [
+          {
+            "node": "Result Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result Respond": {
+      "main": [
+        [
+          {
+            "node": "Process Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Result": {
+      "main": [
+        [
+          {
+            "node": "Result Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Result Router": {
       "main": [
-        [{ "node": "Prepare Screenshot",   "type": "main", "index": 0 }],
-        [{ "node": "Prepare Terminal File","type": "main", "index": 0 }],
-        [{ "node": "Send Result Text",     "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Prepare Screenshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Terminal File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Result Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Prepare Screenshot":    { "main": [[{ "node": "Send Screenshot",    "type": "main", "index": 0 }]] },
-    "Prepare Terminal File": { "main": [[{ "node": "Send Terminal File", "type": "main", "index": 0 }]] }
+    "Prepare Screenshot": {
+      "main": [
+        [
+          {
+            "node": "Send Screenshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Terminal File": {
+      "main": [
+        [
+          {
+            "node": "Send Terminal File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "staticData": null,
-  "tags": ["dispatch", "agent", "v2"],
+  "tags": [
+    "dispatch",
+    "agent",
+    "v2"
+  ],
   "triggerCount": 3,
   "updatedAt": "2026-04-26T00:00:00.000Z",
   "versionId": "3"

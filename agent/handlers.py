@@ -183,11 +183,105 @@ def handle_system_info(_payload: dict) -> dict:
         return _err(f"system-info error: {e}")
 
 
+# ── Obsidian Log ──────────────────────────────────────────────────────────────
+
+def handle_obsidian_log(payload: dict, obsidian_cfg: dict) -> dict:
+    """Append a log entry to an Obsidian note via the Local REST API plugin.
+
+    payload keys:
+      text      – required, the line to append
+      note      – optional, override note name (default from config)
+    """
+    import urllib.request as _req
+    import urllib.error as _uerr
+    from datetime import datetime
+
+    text = payload.get("text", "").strip()
+    if not text:
+        return _err("no text provided")
+
+    host    = obsidian_cfg.get("host", "http://localhost:27123")
+    token   = obsidian_cfg.get("token", "")
+    note    = payload.get("note") or obsidian_cfg.get("note", "claude97")
+    vault   = obsidian_cfg.get("vault", "")
+
+    # Build timestamped markdown line
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"- `{ts}` {text}\n"
+
+    # Obsidian Local REST API: PATCH /vault/<note>.md  → appends content
+    vault_path = f"/vault/{vault}/" if vault else "/vault/"
+    url = f"{host}{vault_path}{note}.md"
+
+    try:
+        request = _req.Request(
+            url,
+            data=line.encode("utf-8"),
+            method="PATCH",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "text/markdown",
+            },
+        )
+        with _req.urlopen(request, timeout=5) as r:
+            r.read()
+        return _ok(f"Logged to Obsidian note '{note}': {text[:80]}")
+    except _uerr.HTTPError as e:
+        # 404 on PATCH = note doesn't exist yet; create it with PUT
+        if e.code == 404:
+            try:
+                header_line = f"# {note}\n\n"
+                put_req = _req.Request(
+                    url,
+                    data=(header_line + line).encode("utf-8"),
+                    method="PUT",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "text/markdown",
+                    },
+                )
+                with _req.urlopen(put_req, timeout=5) as r:
+                    r.read()
+                return _ok(f"Created & logged to Obsidian note '{note}'")
+            except Exception as e2:
+                return _err(f"obsidian create failed: {e2}")
+        return _err(f"obsidian http {e.code}: {e}")
+    except Exception as e:
+        return _err(f"obsidian error: {e}")
+
+
+def handle_obsidian_read(payload: dict, obsidian_cfg: dict) -> dict:
+    """Read the last N lines of an Obsidian note."""
+    import urllib.request as _req
+
+    note  = payload.get("note") or obsidian_cfg.get("note", "claude97")
+    lines = int(payload.get("lines", 20))
+    host  = obsidian_cfg.get("host", "http://localhost:27123")
+    token = obsidian_cfg.get("token", "")
+    vault = obsidian_cfg.get("vault", "")
+
+    vault_path = f"/vault/{vault}/" if vault else "/vault/"
+    url = f"{host}{vault_path}{note}.md"
+
+    try:
+        request = _req.Request(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with _req.urlopen(request, timeout=5) as r:
+            content = r.read().decode("utf-8")
+        tail = "\n".join(content.splitlines()[-lines:])
+        return _ok({"note": note, "content": tail})
+    except Exception as e:
+        return _err(f"obsidian read error: {e}")
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
-def dispatch(command: dict, apps: dict) -> dict:
+def dispatch(command: dict, apps: dict, obsidian_cfg: dict | None = None) -> dict:
     cmd_type = command.get("type", "")
-    payload = command.get("payload", {})
+    payload  = command.get("payload", {})
+    obs_cfg  = obsidian_cfg or {}
 
     if cmd_type == "screenshot":
         return handle_screenshot(payload)
@@ -203,5 +297,9 @@ def dispatch(command: dict, apps: dict) -> dict:
         return handle_install(payload)
     elif cmd_type == "system-info":
         return handle_system_info(payload)
+    elif cmd_type == "obsidian-log":
+        return handle_obsidian_log(payload, obs_cfg)
+    elif cmd_type == "obsidian-read":
+        return handle_obsidian_read(payload, obs_cfg)
     else:
         return _err(f"unknown command type: {cmd_type}")
