@@ -86,6 +86,8 @@ class Poller:
                 timeout=10,
             )
             resp.raise_for_status()
+            if not resp.text.strip():
+                return {}          # empty body = no command queued
             data = resp.json()
             if not data.get("success"):
                 return {}
@@ -100,6 +102,8 @@ class Poller:
             self._set_status("error")
             self._error_count += 1
             return None
+        except ValueError:
+            return {}              # non-JSON body = no command
         except Exception as e:
             logger.error(f"poll error: {e}")
             self._set_status("error")
