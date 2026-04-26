@@ -1,0 +1,20 @@
+{
+  "railway_url": "https://your-project.up.railway.app",
+  "agent_token": "YOUR_AGENT_TOKEN_FROM_RAILWAY_VARS",
+  "poll_interval_active": 2,
+  "poll_interval_idle": 10,
+  "apps": {
+    "cursor": "",
+    "vscode": "",
+    "claude-code": "",
+    "antigravity": "",
+    "terminal": "",
+    "chrome": ""
+  },
+  "autostart": false,
+  "api_limit_usd": 5.0,
+  "openai_api_key": "",
+  "qdrant_url": "",
+  "qdrant_api_key": "",
+  "qdrant_collection": "dispatch_memory"
+}

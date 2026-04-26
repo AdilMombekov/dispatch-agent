@@ -1,0 +1,33 @@
+# Environment / secrets
+.env
+.env.local
+
+# Runtime config (contains token — use config.example.json for reference)
+config.json
+
+# Logs
+*.log
+agent.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# PyInstaller build artifacts (keep build/build.py)
+build/DispatchAgent/
+dist/
+*.spec
+
+# Claude Code local settings
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
