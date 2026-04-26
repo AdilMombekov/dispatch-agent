@@ -185,12 +185,21 @@ def handle_system_info(_payload: dict) -> dict:
 
 # ── Obsidian Log ──────────────────────────────────────────────────────────────
 
+def _obsidian_ctx():
+    """SSL context that accepts Obsidian's self-signed certificate."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def handle_obsidian_log(payload: dict, obsidian_cfg: dict) -> dict:
     """Append a log entry to an Obsidian note via the Local REST API plugin.
 
     payload keys:
-      text      – required, the line to append
-      note      – optional, override note name (default from config)
+      text  – required, the line to append
+      note  – optional, override note name (default from config)
     """
     import urllib.request as _req
     import urllib.error as _uerr
@@ -200,49 +209,40 @@ def handle_obsidian_log(payload: dict, obsidian_cfg: dict) -> dict:
     if not text:
         return _err("no text provided")
 
-    host    = obsidian_cfg.get("host", "http://localhost:27123")
-    token   = obsidian_cfg.get("token", "")
-    note    = payload.get("note") or obsidian_cfg.get("note", "claude97")
-    vault   = obsidian_cfg.get("vault", "")
+    host  = obsidian_cfg.get("host", "https://localhost:27124")
+    token = obsidian_cfg.get("token", "")
+    note  = payload.get("note") or obsidian_cfg.get("note", "claude97")
+    vault = obsidian_cfg.get("vault", "")
+    ctx   = _obsidian_ctx()
 
-    # Build timestamped markdown line
     ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"- `{ts}` {text}\n"
 
-    # Obsidian Local REST API: PATCH /vault/<note>.md  → appends content
     vault_path = f"/vault/{vault}/" if vault else "/vault/"
     url = f"{host}{vault_path}{note}.md"
 
+    def _put(body: bytes):
+        r = _req.Request(url, data=body, method="PUT",
+                         headers={"Authorization": f"Bearer {token}",
+                                  "Content-Type": "text/markdown"})
+        with _req.urlopen(r, timeout=5, context=ctx) as resp:
+            resp.read()
+
+    def _patch(body: bytes):
+        r = _req.Request(url, data=body, method="PATCH",
+                         headers={"Authorization": f"Bearer {token}",
+                                  "Content-Type": "text/markdown"})
+        with _req.urlopen(r, timeout=5, context=ctx) as resp:
+            resp.read()
+
     try:
-        request = _req.Request(
-            url,
-            data=line.encode("utf-8"),
-            method="PATCH",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "text/markdown",
-            },
-        )
-        with _req.urlopen(request, timeout=5) as r:
-            r.read()
-        return _ok(f"Logged to Obsidian note '{note}': {text[:80]}")
+        _patch(line.encode("utf-8"))
+        return _ok(f"Logged to Obsidian '{note}': {text[:80]}")
     except _uerr.HTTPError as e:
-        # 404 on PATCH = note doesn't exist yet; create it with PUT
         if e.code == 404:
             try:
-                header_line = f"# {note}\n\n"
-                put_req = _req.Request(
-                    url,
-                    data=(header_line + line).encode("utf-8"),
-                    method="PUT",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "text/markdown",
-                    },
-                )
-                with _req.urlopen(put_req, timeout=5) as r:
-                    r.read()
-                return _ok(f"Created & logged to Obsidian note '{note}'")
+                _put((f"# {note}\n\n" + line).encode("utf-8"))
+                return _ok(f"Created & logged to Obsidian '{note}'")
             except Exception as e2:
                 return _err(f"obsidian create failed: {e2}")
         return _err(f"obsidian http {e.code}: {e}")
@@ -256,20 +256,18 @@ def handle_obsidian_read(payload: dict, obsidian_cfg: dict) -> dict:
 
     note  = payload.get("note") or obsidian_cfg.get("note", "claude97")
     lines = int(payload.get("lines", 20))
-    host  = obsidian_cfg.get("host", "http://localhost:27123")
+    host  = obsidian_cfg.get("host", "https://localhost:27124")
     token = obsidian_cfg.get("token", "")
     vault = obsidian_cfg.get("vault", "")
+    ctx   = _obsidian_ctx()
 
     vault_path = f"/vault/{vault}/" if vault else "/vault/"
     url = f"{host}{vault_path}{note}.md"
 
     try:
-        request = _req.Request(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        with _req.urlopen(request, timeout=5) as r:
-            content = r.read().decode("utf-8")
+        r = _req.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with _req.urlopen(r, timeout=5, context=ctx) as resp:
+            content = resp.read().decode("utf-8")
         tail = "\n".join(content.splitlines()[-lines:])
         return _ok({"note": note, "content": tail})
     except Exception as e:
