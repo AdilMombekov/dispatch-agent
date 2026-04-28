@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-26T16:16:38.883Z",
+  "updatedAt": "2026-04-28T11:13:13.608Z",
   "createdAt": "2026-04-26T16:16:09.174Z",
   "id": "aKwY0wZ238JbzR8J",
   "name": "Dispatch Agent v2",
@@ -118,7 +118,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `\u0432\u045a\u2026 Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045c\u040a Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045a\u2026 Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '\u0432\u2013\u20ac'.repeat(filled) + '\u0432\u2013\u2018'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `\u0440\u045f\u2019\u00b0 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
+        "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `\u0432\u045a\u2026 Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045c\u040a Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045a\u2026 Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '\u0432\u2013\u20ac'.repeat(filled) + '\u0432\u2013\u2018'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `\u0440\u045f\u2019\u00b0 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
       },
       "id": "command-handler",
       "name": "Command Handler",
@@ -334,7 +334,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = process.env.TELEGRAM_BOT_TOKEN;\nconst openaiKey = process.env.OPENAI_API_KEY;\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received \u0432\u0402\u201d OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
+        "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = '8772041893:AAFOa3zOk-XgAjBxk1PzPfDAkxQuiFx5sUA';\nconst openaiKey = '';\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received \u0432\u0402\u201d OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
       },
       "id": "voice-process",
       "name": "Voice Process",
@@ -407,7 +407,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Check if under spend limit before AI call\nconst input = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nif (!sd.spend.limit_usd) sd.spend.limit_usd = parseFloat(process.env.API_LIMIT_USD || '5');\nconst underLimit = sd.spend.total_usd < sd.spend.limit_usd;\nreturn [{ json: { ...input, _underLimit: underLimit, _limitUsd: sd.spend.limit_usd, _spentUsd: sd.spend.total_usd } }];"
+        "jsCode": "// Check if under spend limit before AI call\nconst input = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\nif (!sd.spend.limit_usd) sd.spend.limit_usd = parseFloat('5.0' || '5');\nconst underLimit = sd.spend.total_usd < sd.spend.limit_usd;\nreturn [{ json: { ...input, _underLimit: underLimit, _limitUsd: sd.spend.limit_usd, _spentUsd: sd.spend.total_usd } }];"
       },
       "id": "spend-check",
       "name": "Spend Check",
@@ -469,7 +469,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable \u0432\u0402\u201d use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
+        "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = ('' || '').trim().replace(/\\/$/, '');\nconst qdrantKey = '' || '';\nconst openaiKey = '' || '';\nconst collection = 'dispatch_memory' || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable \u0432\u0402\u201d use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
       },
       "id": "qdrant-context",
       "name": "Qdrant Context",
@@ -482,7 +482,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Call Anthropic API, track spend, update history\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  process.env.ANTHROPIC_API_KEY_1,\n  process.env.ANTHROPIC_API_KEY_2,\n  process.env.ANTHROPIC_API_KEY_3\n][( activeAccount || 1) - 1] || process.env.ANTHROPIC_API_KEY_1;\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant for a Windows PC remote-control agent. Be concise. The user controls their PC via Telegram. You can queue agent commands by replying with JSON: {\"command\":{\"type\":\"obsidian-log\",\"payload\":{\"text\":\"...\"}}} to log to Obsidian note 'claude97', or {\"command\":{\"type\":\"obsidian-read\",\"payload\":{\"lines\":20}}} to read the log.',\n  messages\n});\n\nconst resp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst reply = resp.content?.[0]?.text || resp.error?.message || '(no response)';\nconst usage = resp.usage || { input_tokens: 0, output_tokens: 0 };\n\n// Track Anthropic cost (Haiku: in=$0.80/M, out=$4.00/M)\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// Save assistant reply to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'assistant', content: reply });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: { chatId, reply, inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost } }];"
+        "jsCode": "const https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  'ANTHROPIC_KEY_REDACTED',\n  'ANTHROPIC_KEY_REDACTED',\n  ''\n][(activeAccount || 1) - 1] || 'ANTHROPIC_KEY_REDACTED';\n\nconst TOOLS = [{\n  name: 'queue_agent_command',\n  description: 'Queue a command for the local Windows PC agent. Use this to take screenshots, run terminal commands, manage files, read/write Obsidian notes, or get system info.',\n  input_schema: {\n    type: 'object',\n    properties: {\n      type: {\n        type: 'string',\n        enum: ['screenshot','terminal','obsidian-log','obsidian-read','system-info','launch-app','install'],\n        description: 'Command type'\n      },\n      payload: {\n        type: 'object',\n        description: 'Command parameters',\n        properties: {\n          command:  { type: 'string', description: 'terminal: shell command to execute' },\n          text:     { type: 'string', description: 'obsidian-log: text to append' },\n          lines:    { type: 'number', description: 'obsidian-read: number of lines (default 20)' },\n          note:     { type: 'string', description: 'obsidian-log/read: note name override' },\n          app:      { type: 'string', description: 'launch-app: app name from config' },\n          url:      { type: 'string', description: 'install: download URL' }\n        }\n      }\n    },\n    required: ['type']\n  }\n}];\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant controlling a Windows PC remotely via Telegram. Be concise. Use the queue_agent_command tool to perform actions on the PC when the user asks.',\n  messages,\n  tools: TOOLS,\n  tool_choice: { type: 'auto' }\n});\n\nconst apiResp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend)      sd.spend      = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nif (!sd.history)    sd.history    = {};\nif (!sd.tool_calls) sd.tool_calls = {};\n\n// GC: clean stale tool_calls (> 5 min)\nconst now = Date.now();\nconst TIMEOUT_MS = 5 * 60 * 1000;\nconst timedOutChats = [];\nfor (const [cmdId, ctx] of Object.entries(sd.tool_calls)) {\n  if (now - ctx.ts > TIMEOUT_MS) {\n    timedOutChats.push(ctx.chat_id);\n    delete sd.tool_calls[cmdId];\n  }\n}\n\n// Track cost\nconst usage = apiResp.usage || { input_tokens: 0, output_tokens: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd     = (sd.spend.total_usd || 0) + cost;\n\n// Parse content blocks\nlet displayText  = '';\nlet toolUseBlock = null;\nfor (const block of (apiResp.content || [])) {\n  if (block.type === 'text')     displayText  += block.text;\n  if (block.type === 'tool_use') toolUseBlock  = block;\n}\n\nlet commandId = null;\nif (toolUseBlock) {\n  commandId = toolUseBlock.id;\n\n  // Snapshot history before appending tool_use\n  const historySnapshot = [...(sd.history[chatId] || [])];\n\n  // Store context for execution #2\n  sd.tool_calls[commandId] = {\n    tool_use_id:       toolUseBlock.id,\n    tool_name:         toolUseBlock.name,\n    tool_input:        toolUseBlock.input,\n    chat_id:           chatId,\n    messages_snapshot: historySnapshot,\n    ts:                now\n  };\n\n  // Queue command for local agent\n  if (!sd.command_queue) sd.command_queue = [];\n  if (sd.command_queue.length >= 50) sd.command_queue.shift();\n  sd.command_queue.push({\n    command_id: commandId,\n    chat_id:    chatId,\n    type:       toolUseBlock.input.type,\n    payload:    toolUseBlock.input.payload || {}\n  });\n\n  // Save assistant message (full content array with tool_use) to history\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'assistant', content: apiResp.content });\n  if (sd.history[chatId].length > 30) sd.history[chatId] = sd.history[chatId].slice(-30);\n\n} else {\n  // Plain text \u2014 save normally\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'assistant', content: displayText });\n  if (sd.history[chatId].length > 30) sd.history[chatId] = sd.history[chatId].slice(-30);\n}\n\nconst reply = displayText || (toolUseBlock ? ('\u0412\u044b\u043f\u043e\u043b\u043d\u044f\u044e ' + toolUseBlock.input.type + '...') : '(no response)');\n\nreturn [{ json: {\n  chatId, reply,\n  hasToolCall: !!toolUseBlock,\n  commandId, timedOutChats,\n  inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost\n} }];"
       },
       "id": "anthropic-full",
       "name": "Anthropic Full",
@@ -495,7 +495,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Store this exchange in Qdrant for future semantic retrieval\nconst https = require('https');\nconst { chatId, reply } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nconst sd = $getWorkflowStaticData('global');\nconst history = sd.history?.[chatId] || [];\n// Get last user message (second-to-last item, since assistant reply was just appended)\nconst userMsg = [...history].reverse().find(m => m.role === 'user')?.content || '';\n\nif (qdrantUrl && openaiKey && userMsg && reply && reply !== '(no response)') {\n  try {\n    const exchangeText = `User: ${userMsg}\\nAssistant: ${reply}`;\n\n    function postJson(hostname, port, path, method, headers, body) {\n      const data = JSON.stringify(body);\n      return new Promise((resolve, reject) => {\n        const req = https.request({ hostname, port: port || 443, path, method, headers: {\n          ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n        }}, res => {\n          const chunks = [];\n          res.on('data', c => chunks.push(c));\n          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n          res.on('error', resolve);\n        });\n        req.on('error', resolve);\n        req.write(data); req.end();\n      });\n    }\n\n    // Embed the exchange\n    const embedResp = await postJson('api.openai.com', 443, '/v1/embeddings', 'POST',\n      { 'Authorization': `Bearer ${openaiKey}` },\n      { model: 'text-embedding-3-small', input: exchangeText }\n    );\n    const vector = embedResp.data?.[0]?.embedding;\n\n    if (vector) {\n      // Track embedding cost\n      if (sd.spend) {\n        const cost = Math.ceil(exchangeText.length / 4) / 1_000_000 * 0.02;\n        sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n        sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n      }\n\n      const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points`);\n      await postJson(\n        urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname, 'PUT',\n        qdrantKey ? { 'api-key': qdrantKey } : {},\n        { points: [{ id: Date.now(), vector, payload: {\n          chat_id: chatId, user_msg: userMsg, assistant_msg: reply, ts: new Date().toISOString()\n        }}] }\n      );\n    }\n  } catch (_) { /* silent fail */ }\n}\n\nreturn [{ json: { chatId, reply } }];"
+        "jsCode": "// Store this exchange in Qdrant for future semantic retrieval\nconst https = require('https');\nconst { chatId, reply } = $input.first().json;\nconst qdrantUrl = ('' || '').trim().replace(/\\/$/, '');\nconst qdrantKey = '' || '';\nconst openaiKey = '' || '';\nconst collection = 'dispatch_memory' || 'dispatch_memory';\n\nconst sd = $getWorkflowStaticData('global');\nconst history = sd.history?.[chatId] || [];\n// Get last user message (second-to-last item, since assistant reply was just appended)\nconst userMsg = [...history].reverse().find(m => m.role === 'user')?.content || '';\n\nif (qdrantUrl && openaiKey && userMsg && reply && reply !== '(no response)') {\n  try {\n    const exchangeText = `User: ${userMsg}\\nAssistant: ${reply}`;\n\n    function postJson(hostname, port, path, method, headers, body) {\n      const data = JSON.stringify(body);\n      return new Promise((resolve, reject) => {\n        const req = https.request({ hostname, port: port || 443, path, method, headers: {\n          ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n        }}, res => {\n          const chunks = [];\n          res.on('data', c => chunks.push(c));\n          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n          res.on('error', resolve);\n        });\n        req.on('error', resolve);\n        req.write(data); req.end();\n      });\n    }\n\n    // Embed the exchange\n    const embedResp = await postJson('api.openai.com', 443, '/v1/embeddings', 'POST',\n      { 'Authorization': `Bearer ${openaiKey}` },\n      { model: 'text-embedding-3-small', input: exchangeText }\n    );\n    const vector = embedResp.data?.[0]?.embedding;\n\n    if (vector) {\n      // Track embedding cost\n      if (sd.spend) {\n        const cost = Math.ceil(exchangeText.length / 4) / 1_000_000 * 0.02;\n        sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n        sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n      }\n\n      const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points`);\n      await postJson(\n        urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname, 'PUT',\n        qdrantKey ? { 'api-key': qdrantKey } : {},\n        { points: [{ id: Date.now(), vector, payload: {\n          chat_id: chatId, user_msg: userMsg, assistant_msg: reply, ts: new Date().toISOString()\n        }}] }\n      );\n    }\n  } catch (_) { /* silent fail */ }\n}\n\nreturn [{ json: { chatId, reply } }];"
       },
       "id": "qdrant-store",
       "name": "Qdrant Store",
@@ -607,7 +607,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const token = $input.first().json.headers?.['x-agent-token'];\nif (token !== '3bafc0aa-bb42-4e01-b918-8c5a8a252a43') return [{ json: { authorized: false } }];\nconst body = $input.first().json.body;\nconst chatId = String(body.chat_id);\nconst commandType = body.command_type;\nconst result = body.result;\nconst sd = $getWorkflowStaticData('global');\nif (commandType === 'chrome-profiles-list' && result.success) sd.chrome_profiles = result.data;\nreturn [{ json: { authorized: true, chatId, commandType, result } }];"
+        "jsCode": "const incomingToken = $input.first().json.headers?.['x-agent-token'];\nif (incomingToken !== '3bafc0aa-bb42-4e01-b918-8c5a8a252a43') return [{ json: { authorized: false } }];\n\nconst body        = $input.first().json.body;\nconst chatId      = String(body.chat_id);\nconst commandId   = body.command_id;\nconst commandType = body.command_type;\nconst result      = body.result;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.tool_calls) sd.tool_calls = {};\nif (!sd.history)    sd.history    = {};\nif (!sd.spend)      sd.spend      = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\n\n// GC stale tool_calls\nconst now = Date.now();\nconst TIMEOUT_MS = 5 * 60 * 1000;\nconst timedOutChats = [];\nfor (const [cmdId, ctx] of Object.entries(sd.tool_calls)) {\n  if (now - ctx.ts > TIMEOUT_MS) {\n    timedOutChats.push(ctx.chat_id);\n    delete sd.tool_calls[cmdId];\n  }\n}\n\nconst ctx = sd.tool_calls[commandId];\n\n// Legacy path: not a tool_call result\nif (!ctx) {\n  return [{ json: { chatId, commandType, result, isToolCall: false, authorized: true, timedOutChats } }];\n}\n\n// Tool Call path: close the async loop\ndelete sd.tool_calls[commandId];\n\nconst toolResultContent = result.success\n  ? (typeof result.data === 'string' ? result.data : JSON.stringify(result.data))\n  : ('Error: ' + result.error);\n\n// Reconstruct messages for second Anthropic call\nconst messagesForClaude = [\n  ...ctx.messages_snapshot,\n  {\n    role: 'assistant',\n    content: [{ type: 'tool_use', id: ctx.tool_use_id, name: ctx.tool_name, input: ctx.tool_input }]\n  },\n  {\n    role: 'user',\n    content: [{ type: 'tool_result', tool_use_id: ctx.tool_use_id, content: toolResultContent, is_error: !result.success }]\n  }\n];\n\n// Second Anthropic call\nconst https = require('https');\nconst apiKey = 'ANTHROPIC_KEY_REDACTED';\n\nconst TOOLS = [{\n  name: 'queue_agent_command',\n  description: 'Queue a command for the local Windows PC agent.',\n  input_schema: {\n    type: 'object',\n    properties: {\n      type: { type: 'string', enum: ['screenshot','terminal','obsidian-log','obsidian-read','system-info','launch-app','install'] },\n      payload: { type: 'object' }\n    },\n    required: ['type']\n  }\n}];\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant controlling a Windows PC remotely via Telegram. Be concise. Use the queue_agent_command tool to perform actions on the PC.',\n  messages: messagesForClaude,\n  tools: TOOLS,\n  tool_choice: { type: 'auto' }\n});\n\nconst apiResp2 = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\n// Track cost\nconst usage2 = apiResp2.usage || { input_tokens: 0, output_tokens: 0 };\nconst cost2 = (usage2.input_tokens / 1_000_000 * 0.80) + (usage2.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost2;\nsd.spend.total_usd     = (sd.spend.total_usd || 0) + cost2;\n\n// Parse second response\nlet finalText    = '';\nlet nextToolBlock = null;\nfor (const block of (apiResp2.content || [])) {\n  if (block.type === 'text')     finalText     += block.text;\n  if (block.type === 'tool_use') nextToolBlock  = block;\n}\n\n// Update history: full tool_use -> tool_result -> final assistant reply\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push(\n  { role: 'assistant', content: [{ type: 'tool_use', id: ctx.tool_use_id, name: ctx.tool_name, input: ctx.tool_input }] },\n  { role: 'user',      content: [{ type: 'tool_result', tool_use_id: ctx.tool_use_id, content: toolResultContent }] }\n);\nif (finalText) {\n  sd.history[chatId].push({ role: 'assistant', content: finalText });\n}\nif (sd.history[chatId].length > 40) sd.history[chatId] = sd.history[chatId].slice(-40);\n\n// Chain: Claude wants another tool call\nif (nextToolBlock) {\n  const nextCmdId = nextToolBlock.id;\n  sd.tool_calls[nextCmdId] = {\n    tool_use_id:       nextToolBlock.id,\n    tool_name:         nextToolBlock.name,\n    tool_input:        nextToolBlock.input,\n    chat_id:           chatId,\n    messages_snapshot: [...sd.history[chatId]],\n    ts:                now\n  };\n  if (!sd.command_queue) sd.command_queue = [];\n  sd.command_queue.push({\n    command_id: nextCmdId, chat_id: chatId,\n    type: nextToolBlock.input.type, payload: nextToolBlock.input.payload || {}\n  });\n}\n\nconst reply = finalText || (nextToolBlock ? ('\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u044e: ' + nextToolBlock.input.type + '...') : 'Done');\n\nreturn [{ json: {\n  chatId, reply, isToolCall: true, commandType, authorized: true,\n  timedOutChats, hasChainedCommand: !!nextToolBlock\n} }];"
       },
       "id": "process-result",
       "name": "Process Result",
@@ -786,6 +786,75 @@
         }
       },
       "webhookId": "87de090d-b056-4608-9319-467dcdda40d8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isToolCall }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "id": "is-tool-call",
+      "name": "Is Tool Call?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        650,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "send-tool-reply",
+      "name": "Send Tool Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        860
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "Ie6tdHWYmxtqisex",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      },
+      "webhookId": "f43b15fa-ae49-414c-a287-db38b96ec0e3"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.timedOutChats[0] }}",
+        "text": "=\u23f3 \u041a\u043e\u043c\u0430\u043d\u0434\u0430 \u043d\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u0430 \u2014 \u0430\u0433\u0435\u043d\u0442 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u043b 5 \u043c\u0438\u043d\u0443\u0442.\n\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435, \u0437\u0430\u043f\u0443\u0449\u0435\u043d \u043b\u0438 DispatchAgent.exe.",
+        "additionalFields": {}
+      },
+      "id": "send-timeout-notify",
+      "name": "Send Timeout Notify",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        1200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "Ie6tdHWYmxtqisex",
+          "name": "TELEGRAM_BOT_TOKEN"
+        }
+      },
+      "webhookId": "48f9edb9-1a3d-4307-96e9-485784e2c686"
     }
   ],
   "connections": {
@@ -1055,7 +1124,7 @@
       "main": [
         [
           {
-            "node": "Result Router",
+            "node": "Is Tool Call?",
             "type": "main",
             "index": 0
           }
@@ -1108,17 +1177,170 @@
           }
         ]
       ]
+    },
+    "Is Tool Call?": {
+      "main": [
+        [
+          {
+            "node": "Send Tool Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1"
   },
-  "staticData": null,
+  "staticData": {
+    "global": {
+      "command_queue": [],
+      "pending": {},
+      "history": {
+        "8761312498": [
+          {
+            "role": "user",
+            "content": "\u041a\u043e\u043c\u0430\u043d\u0434\u044b"
+          },
+          {
+            "role": "user",
+            "content": "\u0410\u043b\u0435"
+          },
+          {
+            "role": "user",
+            "content": "\u041d\u0443"
+          },
+          {
+            "role": "user",
+            "content": "\u0415\u0441\u0442\u044c \u043e\u0442\u0432\u0435\u0442 \u043d\u0435\u0442"
+          },
+          {
+            "role": "user",
+            "content": "\u0411\u044b\u0441\u0442\u0440\u0435\u0435"
+          },
+          {
+            "role": "user",
+            "content": "\u0410\u043b\u0435"
+          },
+          {
+            "role": "user",
+            "content": "\u0422\u044b \u0442\u0443\u0442"
+          },
+          {
+            "role": "user",
+            "content": "\u0410\u043b\u0435"
+          },
+          {
+            "role": "user",
+            "content": "\u041a\u043e\u043c\u0430\u043d\u0434\u0430"
+          },
+          {
+            "role": "user",
+            "content": "\u0422\u044b \u0442\u0443\u0442?"
+          },
+          {
+            "role": "user",
+            "content": "\u041e\u0442\u0432\u0435\u0442\u044c"
+          },
+          {
+            "role": "user",
+            "content": "\u041d\u0435\u0442"
+          },
+          {
+            "role": "user",
+            "content": "\u0421\u0443\u043a\u0430 \u0447\u0435 \u0442\u044b \u0442\u0430\u043a\u043e\u0439 \u0442\u0443\u043f\u043e\u0439"
+          },
+          {
+            "role": "user",
+            "content": "\u0425\u0443\u0439\u043b\u0443\u0448\u0430"
+          },
+          {
+            "role": "user",
+            "content": "\u043f\u0440\u0438\u0432\u0435\u0442"
+          },
+          {
+            "role": "assistant",
+            "content": "\u041f\u0440\u0438\u0432\u0435\u0442! \ud83d\udc4b \u042f \u0437\u0434\u0435\u0441\u044c \u0438 \u0433\u043e\u0442\u043e\u0432 \u043f\u043e\u043c\u043e\u0433\u0430\u0442\u044c.\n\n\u0414\u043b\u044f \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u041f\u041a \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0439 \u043c\u043d\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b. \u0412\u043e\u0442 \u0447\u0442\u043e \u044f \u043c\u043e\u0433\u0443 \u0434\u0435\u043b\u0430\u0442\u044c:\n\n**\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b:**\n- `screenshot` - \u0441\u043a\u0440\u0438\u043d\u0448\u043e\u0442 \u044d\u043a\u0440\u0430\u043d\u0430\n- `click x y` - \u043a\u043b\u0438\u043a \u043f\u043e \u043a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u0430\u043c\n- `type \"\u0442\u0435\u043a\u0441\u0442\"` - \u0432\u0432\u043e\u0434 \u0442\u0435\u043a\u0441\u0442\u0430\n- `key command` - \u043d\u0430\u0436\u0430\u0442\u0438\u0435 \u043a\u043b\u0430\u0432\u0438\u0448 (win, enter, alt+tab \u0438 \u0442.\u0434.)\n- `open \"\u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430\"` - \u0437\u0430\u043f\u0443\u0441\u043a \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f\n- `obsidian-log \"\u0442\u0435\u043a\u0441\u0442\"` - \u0437\u0430\u043f\u0438\u0441\u044c \u0432 \u043b\u043e\u0433 Obsidian\n\n**\u041f\u0440\u0438\u043c\u0435\u0440\u044b:**\n```\nscreenshot\ntype \"hello world\"\nkey win\nclick 100 200\n```\n\n\u0427\u0442\u043e \u043d\u0443\u0436\u043d\u043e \u0441\u0434\u0435\u043b\u0430\u0442\u044c?"
+          },
+          {
+            "role": "user",
+            "content": "-screenshot"
+          },
+          {
+            "role": "assistant",
+            "content": "```json\n{\"command\":{\"type\":\"screenshot\"}}\n```\n\n\u0421\u043a\u0440\u0438\u043d\u0448\u043e\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d. \u0427\u0442\u043e \u0434\u0430\u043b\u044c\u0448\u0435?"
+          },
+          {
+            "role": "user",
+            "content": "\u0441\u0434\u0435\u043b\u0430\u0439 \u0441\u043a\u0440\u0438\u043d\u0448\u043e\u0442 \u044d\u043a\u0440\u0430\u043d\u0430"
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01Py63WG5ipsYbmztFd6VA4e",
+                "name": "queue_agent_command",
+                "input": {
+                  "type": "screenshot"
+                },
+                "caller": {
+                  "type": "direct"
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_01Py63WG5ipsYbmztFd6VA4e",
+                "name": "queue_agent_command",
+                "input": {
+                  "type": "screenshot"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "toolu_01Py63WG5ipsYbmztFd6VA4e",
+                "content": "{\"image\":\"BASE64_PLACEHOLDER\",\"width\":1920,\"height\":1080}"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "\u0413\u043e\u0442\u043e\u0432\u043e! \u0421\u043a\u0440\u0438\u043d\u0448\u043e\u0442 \u0441\u0434\u0435\u043b\u0430\u043d. \u041d\u0430 \u044d\u043a\u0440\u0430\u043d\u0435 \u043f\u0443\u0441\u0442\u043e \u0438\u043b\u0438 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u044b \u043a\u0430\u043a\u0438\u0435-\u0442\u043e \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f?"
+          }
+        ]
+      },
+      "spend": {
+        "total_usd": 0.0035632000000000003,
+        "limit_usd": 5,
+        "anthropic_usd": 0.0035632000000000003,
+        "openai_usd": 0
+      },
+      "tool_calls": {}
+    }
+  },
   "meta": null,
   "pinData": null,
-  "versionId": "4e690450-9bcf-40e4-b7ee-8fe1b26e2d89",
-  "activeVersionId": "4e690450-9bcf-40e4-b7ee-8fe1b26e2d89",
-  "versionCounter": 6,
+  "versionId": "9c11a16e-aeb3-45be-8e48-ef1b6c5a58e0",
+  "activeVersionId": "9c11a16e-aeb3-45be-8e48-ef1b6c5a58e0",
+  "versionCounter": 54,
   "triggerCount": 3,
   "shared": [
     {
@@ -1142,9 +1364,9 @@
   "tags": [],
   "parentFolder": null,
   "activeVersion": {
-    "updatedAt": "2026-04-26T16:16:38.890Z",
-    "createdAt": "2026-04-26T16:16:38.890Z",
-    "versionId": "4e690450-9bcf-40e4-b7ee-8fe1b26e2d89",
+    "updatedAt": "2026-04-28T11:13:13.614Z",
+    "createdAt": "2026-04-28T11:13:13.614Z",
+    "versionId": "9c11a16e-aeb3-45be-8e48-ef1b6c5a58e0",
     "workflowId": "aKwY0wZ238JbzR8J",
     "nodes": [
       {
@@ -1258,7 +1480,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `\u0432\u045a\u2026 Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045c\u040a Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045a\u2026 Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '\u0432\u2013\u20ac'.repeat(filled) + '\u0432\u2013\u2018'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `\u0440\u045f\u2019\u00b0 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
+          "jsCode": "const msg = $input.first().json.message;\nconst chatId = msg.chat.id;\nconst text = msg.text || '';\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\n\nif (text.startsWith('/setlimit')) {\n  const val = parseFloat(text.split(' ')[1] || '');\n  if (!isNaN(val) && val > 0) {\n    sd.spend.limit_usd = val;\n    return [{ json: { chatId, replyType: 'info', replyText: `\u0432\u045a\u2026 Spend limit set to $${val.toFixed(2)}` } }];\n  }\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045c\u040a Usage: /setlimit 10.0' } }];\n}\n\nif (text.startsWith('/resetspend')) {\n  sd.spend.total_usd = 0; sd.spend.anthropic_usd = 0; sd.spend.openai_usd = 0;\n  return [{ json: { chatId, replyType: 'info', replyText: '\u0432\u045a\u2026 Spend reset to $0.00' } }];\n}\n\nif (text.startsWith('/spend')) {\n  const sp = sd.spend;\n  const pct = Math.min(sp.total_usd / sp.limit_usd * 100, 100).toFixed(1);\n  const filled = Math.floor(pct / 10);\n  const bar = '\u0432\u2013\u20ac'.repeat(filled) + '\u0432\u2013\u2018'.repeat(10 - filled);\n  return [{ json: { chatId, replyType: 'info', replyText: `\u0440\u045f\u2019\u00b0 *Spend Report*\\n${bar} ${pct}%\\nTotal: $${sp.total_usd.toFixed(4)} / $${sp.limit_usd.toFixed(2)}\\nAnthropic: $${sp.anthropic_usd.toFixed(4)}\\nOpenAI: $${(sp.openai_usd || 0).toFixed(4)}` } }];\n}\n\nreturn [{ json: { chatId, text, replyType: 'menu' } }];"
         },
         "id": "command-handler",
         "name": "Command Handler",
@@ -1474,7 +1696,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = process.env.TELEGRAM_BOT_TOKEN;\nconst openaiKey = process.env.OPENAI_API_KEY;\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received \u0432\u0402\u201d OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
+          "jsCode": "// Download voice from Telegram and transcribe with OpenAI Whisper\nconst https = require('https');\nconst { chatId, fileId, duration } = $input.first().json;\nconst botToken = '8772041893:AAFOa3zOk-XgAjBxk1PzPfDAkxQuiFx5sUA';\nconst openaiKey = '';\n\nif (!openaiKey) {\n  const sd = $getWorkflowStaticData('global');\n  if (!sd.history) sd.history = {};\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'user', content: '[Voice message received \u0432\u0402\u201d OpenAI key not set for transcription]' });\n  if (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n  return [{ json: { chatId, mode: 'ai', messages: sd.history[chatId], activeAccount: 1 } }];\n}\n\nfunction httpGet(url) {\n  return new Promise((resolve, reject) => {\n    https.get(url, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(Buffer.concat(chunks)));\n      res.on('error', reject);\n    }).on('error', reject);\n  });\n}\n\nfunction whisperMultipart(audioBuffer, openaiKey) {\n  const boundary = 'dispatch' + Date.now();\n  const header = Buffer.from(\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"model\"\\r\\n\\r\\nwhisper-1\\r\\n` +\n    `--${boundary}\\r\\nContent-Disposition: form-data; name=\"file\"; filename=\"voice.ogg\"\\r\\nContent-Type: audio/ogg\\r\\n\\r\\n`\n  );\n  const footer = Buffer.from(`\\r\\n--${boundary}--\\r\\n`);\n  const body = Buffer.concat([header, audioBuffer, footer]);\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.openai.com', path: '/v1/audio/transcriptions', method: 'POST',\n      headers: {\n        'Authorization': `Bearer ${openaiKey}`,\n        'Content-Type': `multipart/form-data; boundary=${boundary}`,\n        'Content-Length': body.length\n      }\n    }, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n      res.on('error', reject);\n    });\n    req.on('error', reject);\n    req.write(body); req.end();\n  });\n}\n\n// 1. Get Telegram file path\nconst fileInfoBuf = await httpGet(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);\nconst fileInfo = JSON.parse(fileInfoBuf.toString());\nif (!fileInfo.ok || !fileInfo.result?.file_path) {\n  throw new Error('Telegram getFile failed: ' + fileInfoBuf.toString());\n}\n\n// 2. Download OGG audio\nconst audioBuf = await httpGet(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);\n\n// 3. Transcribe\nconst whisperResp = await whisperMultipart(audioBuf, openaiKey);\nconst transcript = whisperResp.text || '(transcription failed)';\n\n// 4. Track Whisper cost\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\nconst minutes = Math.max(Math.ceil((duration || 1) / 60), 1);\nconst cost = minutes * 0.006;\nsd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// 5. Add transcript to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'user', content: transcript });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: {\n  chatId, mode: 'ai',\n  messages: sd.history[chatId],\n  activeAccount: sd.active_account || 1,\n  _voiceTranscript: transcript\n} }];"
         },
         "id": "voice-process",
         "name": "Voice Process",
@@ -1547,7 +1769,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Check if under spend limit before AI call\nconst input = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat(process.env.API_LIMIT_USD || '5'), anthropic_usd: 0, openai_usd: 0 };\nif (!sd.spend.limit_usd) sd.spend.limit_usd = parseFloat(process.env.API_LIMIT_USD || '5');\nconst underLimit = sd.spend.total_usd < sd.spend.limit_usd;\nreturn [{ json: { ...input, _underLimit: underLimit, _limitUsd: sd.spend.limit_usd, _spentUsd: sd.spend.total_usd } }];"
+          "jsCode": "// Check if under spend limit before AI call\nconst input = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: parseFloat('5.0' || '5'), anthropic_usd: 0, openai_usd: 0 };\nif (!sd.spend.limit_usd) sd.spend.limit_usd = parseFloat('5.0' || '5');\nconst underLimit = sd.spend.total_usd < sd.spend.limit_usd;\nreturn [{ json: { ...input, _underLimit: underLimit, _limitUsd: sd.spend.limit_usd, _spentUsd: sd.spend.total_usd } }];"
         },
         "id": "spend-check",
         "name": "Spend Check",
@@ -1609,7 +1831,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable \u0432\u0402\u201d use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
+          "jsCode": "// Semantic context from Qdrant (if configured), else pass through\n// Cost savings: replace 20-message history with 3 semantically-relevant past exchanges\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\nconst qdrantUrl = ('' || '').trim().replace(/\\/$/, '');\nconst qdrantKey = '' || '';\nconst openaiKey = '' || '';\nconst collection = 'dispatch_memory' || 'dispatch_memory';\n\nfunction postJsonRaw(hostname, port, path, headers, body) {\n  const data = typeof body === 'string' ? body : JSON.stringify(body);\n  return new Promise((resolve, reject) => {\n    const req = https.request({ hostname, port: port || 443, path, method: 'POST', headers: {\n      ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n    }}, res => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n      res.on('error', resolve);\n    });\n    req.on('error', resolve);\n    req.write(data); req.end();\n  });\n}\n\nlet contextMessages = messages;\n\nif (qdrantUrl && openaiKey) {\n  try {\n    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';\n    if (lastUserMsg) {\n      // Embed the user query\n      const embedResp = await postJsonRaw('api.openai.com', 443, '/v1/embeddings',\n        { 'Authorization': `Bearer ${openaiKey}` },\n        { model: 'text-embedding-3-small', input: lastUserMsg }\n      );\n      const vector = embedResp.data?.[0]?.embedding;\n\n      if (vector) {\n        // Track embedding cost ($0.02/1M tokens)\n        const sd = $getWorkflowStaticData('global');\n        if (sd.spend) {\n          const estTokens = Math.ceil(lastUserMsg.length / 4);\n          const cost = estTokens / 1_000_000 * 0.02;\n          sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n          sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n        }\n\n        // Parse Qdrant URL for host/port/path\n        const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points/search`);\n        const searchResp = await postJsonRaw(\n          urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname,\n          qdrantKey ? { 'api-key': qdrantKey } : {},\n          { vector, limit: 3, with_payload: true, score_threshold: 0.75,\n            filter: { must: [{ key: 'chat_id', match: { value: chatId } }] } }\n        );\n\n        const hits = searchResp.result || [];\n        if (hits.length > 0) {\n          const pastCtx = hits\n            .map(h => `Q: ${h.payload.user_msg}\\nA: ${h.payload.assistant_msg}`)\n            .join('\\n---\\n');\n          // Replace full 20-msg history with 3 relevant past + last 4 messages\n          contextMessages = [\n            { role: 'user', content: `[Relevant past context]:\\n${pastCtx}` },\n            { role: 'assistant', content: 'I recall.' },\n            ...messages.slice(-4)\n          ];\n        }\n      }\n    }\n  } catch (_) { /* Qdrant unavailable \u0432\u0402\u201d use full history */ }\n}\n\nreturn [{ json: { chatId, messages: contextMessages, activeAccount } }];"
         },
         "id": "qdrant-context",
         "name": "Qdrant Context",
@@ -1622,7 +1844,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Call Anthropic API, track spend, update history\nconst https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  process.env.ANTHROPIC_API_KEY_1,\n  process.env.ANTHROPIC_API_KEY_2,\n  process.env.ANTHROPIC_API_KEY_3\n][( activeAccount || 1) - 1] || process.env.ANTHROPIC_API_KEY_1;\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant for a Windows PC remote-control agent. Be concise. The user controls their PC via Telegram. You can queue agent commands by replying with JSON: {\"command\":{\"type\":\"obsidian-log\",\"payload\":{\"text\":\"...\"}}} to log to Obsidian note 'claude97', or {\"command\":{\"type\":\"obsidian-read\",\"payload\":{\"lines\":20}}} to read the log.',\n  messages\n});\n\nconst resp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst reply = resp.content?.[0]?.text || resp.error?.message || '(no response)';\nconst usage = resp.usage || { input_tokens: 0, output_tokens: 0 };\n\n// Track Anthropic cost (Haiku: in=$0.80/M, out=$4.00/M)\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend) sd.spend = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n\n// Save assistant reply to history\nif (!sd.history) sd.history = {};\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push({ role: 'assistant', content: reply });\nif (sd.history[chatId].length > 20) sd.history[chatId] = sd.history[chatId].slice(-20);\n\nreturn [{ json: { chatId, reply, inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost } }];"
+          "jsCode": "const https = require('https');\nconst { chatId, messages, activeAccount } = $input.first().json;\n\nconst apiKey = [\n  'ANTHROPIC_KEY_REDACTED',\n  'ANTHROPIC_KEY_REDACTED',\n  ''\n][(activeAccount || 1) - 1] || 'ANTHROPIC_KEY_REDACTED';\n\nconst TOOLS = [{\n  name: 'queue_agent_command',\n  description: 'Queue a command for the local Windows PC agent. Use this to take screenshots, run terminal commands, manage files, read/write Obsidian notes, or get system info.',\n  input_schema: {\n    type: 'object',\n    properties: {\n      type: {\n        type: 'string',\n        enum: ['screenshot','terminal','obsidian-log','obsidian-read','system-info','launch-app','install'],\n        description: 'Command type'\n      },\n      payload: {\n        type: 'object',\n        description: 'Command parameters',\n        properties: {\n          command:  { type: 'string', description: 'terminal: shell command to execute' },\n          text:     { type: 'string', description: 'obsidian-log: text to append' },\n          lines:    { type: 'number', description: 'obsidian-read: number of lines (default 20)' },\n          note:     { type: 'string', description: 'obsidian-log/read: note name override' },\n          app:      { type: 'string', description: 'launch-app: app name from config' },\n          url:      { type: 'string', description: 'install: download URL' }\n        }\n      }\n    },\n    required: ['type']\n  }\n}];\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant controlling a Windows PC remotely via Telegram. Be concise. Use the queue_agent_command tool to perform actions on the PC when the user asks.',\n  messages,\n  tools: TOOLS,\n  tool_choice: { type: 'auto' }\n});\n\nconst apiResp = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.spend)      sd.spend      = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\nif (!sd.history)    sd.history    = {};\nif (!sd.tool_calls) sd.tool_calls = {};\n\n// GC: clean stale tool_calls (> 5 min)\nconst now = Date.now();\nconst TIMEOUT_MS = 5 * 60 * 1000;\nconst timedOutChats = [];\nfor (const [cmdId, ctx] of Object.entries(sd.tool_calls)) {\n  if (now - ctx.ts > TIMEOUT_MS) {\n    timedOutChats.push(ctx.chat_id);\n    delete sd.tool_calls[cmdId];\n  }\n}\n\n// Track cost\nconst usage = apiResp.usage || { input_tokens: 0, output_tokens: 0 };\nconst cost = (usage.input_tokens / 1_000_000 * 0.80) + (usage.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost;\nsd.spend.total_usd     = (sd.spend.total_usd || 0) + cost;\n\n// Parse content blocks\nlet displayText  = '';\nlet toolUseBlock = null;\nfor (const block of (apiResp.content || [])) {\n  if (block.type === 'text')     displayText  += block.text;\n  if (block.type === 'tool_use') toolUseBlock  = block;\n}\n\nlet commandId = null;\nif (toolUseBlock) {\n  commandId = toolUseBlock.id;\n\n  // Snapshot history before appending tool_use\n  const historySnapshot = [...(sd.history[chatId] || [])];\n\n  // Store context for execution #2\n  sd.tool_calls[commandId] = {\n    tool_use_id:       toolUseBlock.id,\n    tool_name:         toolUseBlock.name,\n    tool_input:        toolUseBlock.input,\n    chat_id:           chatId,\n    messages_snapshot: historySnapshot,\n    ts:                now\n  };\n\n  // Queue command for local agent\n  if (!sd.command_queue) sd.command_queue = [];\n  if (sd.command_queue.length >= 50) sd.command_queue.shift();\n  sd.command_queue.push({\n    command_id: commandId,\n    chat_id:    chatId,\n    type:       toolUseBlock.input.type,\n    payload:    toolUseBlock.input.payload || {}\n  });\n\n  // Save assistant message (full content array with tool_use) to history\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'assistant', content: apiResp.content });\n  if (sd.history[chatId].length > 30) sd.history[chatId] = sd.history[chatId].slice(-30);\n\n} else {\n  // Plain text \u2014 save normally\n  if (!sd.history[chatId]) sd.history[chatId] = [];\n  sd.history[chatId].push({ role: 'assistant', content: displayText });\n  if (sd.history[chatId].length > 30) sd.history[chatId] = sd.history[chatId].slice(-30);\n}\n\nconst reply = displayText || (toolUseBlock ? ('\u0412\u044b\u043f\u043e\u043b\u043d\u044f\u044e ' + toolUseBlock.input.type + '...') : '(no response)');\n\nreturn [{ json: {\n  chatId, reply,\n  hasToolCall: !!toolUseBlock,\n  commandId, timedOutChats,\n  inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost\n} }];"
         },
         "id": "anthropic-full",
         "name": "Anthropic Full",
@@ -1635,7 +1857,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Store this exchange in Qdrant for future semantic retrieval\nconst https = require('https');\nconst { chatId, reply } = $input.first().json;\nconst qdrantUrl = (process.env.QDRANT_URL || '').trim().replace(/\\/$/, '');\nconst qdrantKey = process.env.QDRANT_API_KEY || '';\nconst openaiKey = process.env.OPENAI_API_KEY || '';\nconst collection = process.env.QDRANT_COLLECTION || 'dispatch_memory';\n\nconst sd = $getWorkflowStaticData('global');\nconst history = sd.history?.[chatId] || [];\n// Get last user message (second-to-last item, since assistant reply was just appended)\nconst userMsg = [...history].reverse().find(m => m.role === 'user')?.content || '';\n\nif (qdrantUrl && openaiKey && userMsg && reply && reply !== '(no response)') {\n  try {\n    const exchangeText = `User: ${userMsg}\\nAssistant: ${reply}`;\n\n    function postJson(hostname, port, path, method, headers, body) {\n      const data = JSON.stringify(body);\n      return new Promise((resolve, reject) => {\n        const req = https.request({ hostname, port: port || 443, path, method, headers: {\n          ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n        }}, res => {\n          const chunks = [];\n          res.on('data', c => chunks.push(c));\n          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n          res.on('error', resolve);\n        });\n        req.on('error', resolve);\n        req.write(data); req.end();\n      });\n    }\n\n    // Embed the exchange\n    const embedResp = await postJson('api.openai.com', 443, '/v1/embeddings', 'POST',\n      { 'Authorization': `Bearer ${openaiKey}` },\n      { model: 'text-embedding-3-small', input: exchangeText }\n    );\n    const vector = embedResp.data?.[0]?.embedding;\n\n    if (vector) {\n      // Track embedding cost\n      if (sd.spend) {\n        const cost = Math.ceil(exchangeText.length / 4) / 1_000_000 * 0.02;\n        sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n        sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n      }\n\n      const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points`);\n      await postJson(\n        urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname, 'PUT',\n        qdrantKey ? { 'api-key': qdrantKey } : {},\n        { points: [{ id: Date.now(), vector, payload: {\n          chat_id: chatId, user_msg: userMsg, assistant_msg: reply, ts: new Date().toISOString()\n        }}] }\n      );\n    }\n  } catch (_) { /* silent fail */ }\n}\n\nreturn [{ json: { chatId, reply } }];"
+          "jsCode": "// Store this exchange in Qdrant for future semantic retrieval\nconst https = require('https');\nconst { chatId, reply } = $input.first().json;\nconst qdrantUrl = ('' || '').trim().replace(/\\/$/, '');\nconst qdrantKey = '' || '';\nconst openaiKey = '' || '';\nconst collection = 'dispatch_memory' || 'dispatch_memory';\n\nconst sd = $getWorkflowStaticData('global');\nconst history = sd.history?.[chatId] || [];\n// Get last user message (second-to-last item, since assistant reply was just appended)\nconst userMsg = [...history].reverse().find(m => m.role === 'user')?.content || '';\n\nif (qdrantUrl && openaiKey && userMsg && reply && reply !== '(no response)') {\n  try {\n    const exchangeText = `User: ${userMsg}\\nAssistant: ${reply}`;\n\n    function postJson(hostname, port, path, method, headers, body) {\n      const data = JSON.stringify(body);\n      return new Promise((resolve, reject) => {\n        const req = https.request({ hostname, port: port || 443, path, method, headers: {\n          ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data)\n        }}, res => {\n          const chunks = [];\n          res.on('data', c => chunks.push(c));\n          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({}); } });\n          res.on('error', resolve);\n        });\n        req.on('error', resolve);\n        req.write(data); req.end();\n      });\n    }\n\n    // Embed the exchange\n    const embedResp = await postJson('api.openai.com', 443, '/v1/embeddings', 'POST',\n      { 'Authorization': `Bearer ${openaiKey}` },\n      { model: 'text-embedding-3-small', input: exchangeText }\n    );\n    const vector = embedResp.data?.[0]?.embedding;\n\n    if (vector) {\n      // Track embedding cost\n      if (sd.spend) {\n        const cost = Math.ceil(exchangeText.length / 4) / 1_000_000 * 0.02;\n        sd.spend.openai_usd = (sd.spend.openai_usd || 0) + cost;\n        sd.spend.total_usd = (sd.spend.total_usd || 0) + cost;\n      }\n\n      const urlObj = new URL(`${qdrantUrl}/collections/${collection}/points`);\n      await postJson(\n        urlObj.hostname, parseInt(urlObj.port) || 443, urlObj.pathname, 'PUT',\n        qdrantKey ? { 'api-key': qdrantKey } : {},\n        { points: [{ id: Date.now(), vector, payload: {\n          chat_id: chatId, user_msg: userMsg, assistant_msg: reply, ts: new Date().toISOString()\n        }}] }\n      );\n    }\n  } catch (_) { /* silent fail */ }\n}\n\nreturn [{ json: { chatId, reply } }];"
         },
         "id": "qdrant-store",
         "name": "Qdrant Store",
@@ -1687,7 +1909,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const req = $input.first().json;\nconst token = req.headers?.['x-agent-token'];\nif (token !== process.env.AGENT_TOKEN) {\n  return [{ json: { responseBody: JSON.stringify({ success: false, data: null, error: 'unauthorized' }) } }];\n}\nconst sd = $getWorkflowStaticData('global');\nif (!sd.command_queue) sd.command_queue = [];\nif (sd.command_queue.length > 50) sd.command_queue = sd.command_queue.slice(-50);\nlet cmd = {};\nif (sd.command_queue.length > 0) cmd = sd.command_queue.shift();\nreturn [{ json: { responseBody: JSON.stringify({ success: true, data: cmd, error: null }) } }];"
+          "jsCode": "const req = $input.first().json;\nconst token = req.headers?.['x-agent-token'];\nif (token !== '3bafc0aa-bb42-4e01-b918-8c5a8a252a43') {\n  return [{ json: { responseBody: JSON.stringify({ success: false, data: null, error: 'unauthorized' }) } }];\n}\nconst sd = $getWorkflowStaticData('global');\nif (!sd.command_queue) sd.command_queue = [];\nif (sd.command_queue.length > 50) sd.command_queue = sd.command_queue.slice(-50);\nlet cmd = {};\nif (sd.command_queue.length > 0) cmd = sd.command_queue.shift();\nreturn [{ json: { responseBody: JSON.stringify({ success: true, data: cmd, error: null }) } }];"
         },
         "id": "poll-handler",
         "name": "Poll Handler",
@@ -1747,7 +1969,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const token = $input.first().json.headers?.['x-agent-token'];\nif (token !== process.env.AGENT_TOKEN) return [{ json: { authorized: false } }];\nconst body = $input.first().json.body;\nconst chatId = String(body.chat_id);\nconst commandType = body.command_type;\nconst result = body.result;\nconst sd = $getWorkflowStaticData('global');\nif (commandType === 'chrome-profiles-list' && result.success) sd.chrome_profiles = result.data;\nreturn [{ json: { authorized: true, chatId, commandType, result } }];"
+          "jsCode": "const incomingToken = $input.first().json.headers?.['x-agent-token'];\nif (incomingToken !== '3bafc0aa-bb42-4e01-b918-8c5a8a252a43') return [{ json: { authorized: false } }];\n\nconst body        = $input.first().json.body;\nconst chatId      = String(body.chat_id);\nconst commandId   = body.command_id;\nconst commandType = body.command_type;\nconst result      = body.result;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.tool_calls) sd.tool_calls = {};\nif (!sd.history)    sd.history    = {};\nif (!sd.spend)      sd.spend      = { total_usd: 0, limit_usd: 5, anthropic_usd: 0, openai_usd: 0 };\n\n// GC stale tool_calls\nconst now = Date.now();\nconst TIMEOUT_MS = 5 * 60 * 1000;\nconst timedOutChats = [];\nfor (const [cmdId, ctx] of Object.entries(sd.tool_calls)) {\n  if (now - ctx.ts > TIMEOUT_MS) {\n    timedOutChats.push(ctx.chat_id);\n    delete sd.tool_calls[cmdId];\n  }\n}\n\nconst ctx = sd.tool_calls[commandId];\n\n// Legacy path: not a tool_call result\nif (!ctx) {\n  return [{ json: { chatId, commandType, result, isToolCall: false, authorized: true, timedOutChats } }];\n}\n\n// Tool Call path: close the async loop\ndelete sd.tool_calls[commandId];\n\nconst toolResultContent = result.success\n  ? (typeof result.data === 'string' ? result.data : JSON.stringify(result.data))\n  : ('Error: ' + result.error);\n\n// Reconstruct messages for second Anthropic call\nconst messagesForClaude = [\n  ...ctx.messages_snapshot,\n  {\n    role: 'assistant',\n    content: [{ type: 'tool_use', id: ctx.tool_use_id, name: ctx.tool_name, input: ctx.tool_input }]\n  },\n  {\n    role: 'user',\n    content: [{ type: 'tool_result', tool_use_id: ctx.tool_use_id, content: toolResultContent, is_error: !result.success }]\n  }\n];\n\n// Second Anthropic call\nconst https = require('https');\nconst apiKey = 'ANTHROPIC_KEY_REDACTED';\n\nconst TOOLS = [{\n  name: 'queue_agent_command',\n  description: 'Queue a command for the local Windows PC agent.',\n  input_schema: {\n    type: 'object',\n    properties: {\n      type: { type: 'string', enum: ['screenshot','terminal','obsidian-log','obsidian-read','system-info','launch-app','install'] },\n      payload: { type: 'object' }\n    },\n    required: ['type']\n  }\n}];\n\nconst reqBody = JSON.stringify({\n  model: 'claude-haiku-4-5-20251001',\n  max_tokens: 1024,\n  system: 'You are a helpful assistant controlling a Windows PC remotely via Telegram. Be concise. Use the queue_agent_command tool to perform actions on the PC.',\n  messages: messagesForClaude,\n  tools: TOOLS,\n  tool_choice: { type: 'auto' }\n});\n\nconst apiResp2 = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json',\n      'Content-Length': Buffer.byteLength(reqBody)\n    }\n  }, res => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(e); } });\n    res.on('error', reject);\n  });\n  req.on('error', reject);\n  req.write(reqBody); req.end();\n});\n\n// Track cost\nconst usage2 = apiResp2.usage || { input_tokens: 0, output_tokens: 0 };\nconst cost2 = (usage2.input_tokens / 1_000_000 * 0.80) + (usage2.output_tokens / 1_000_000 * 4.00);\nsd.spend.anthropic_usd = (sd.spend.anthropic_usd || 0) + cost2;\nsd.spend.total_usd     = (sd.spend.total_usd || 0) + cost2;\n\n// Parse second response\nlet finalText    = '';\nlet nextToolBlock = null;\nfor (const block of (apiResp2.content || [])) {\n  if (block.type === 'text')     finalText     += block.text;\n  if (block.type === 'tool_use') nextToolBlock  = block;\n}\n\n// Update history: full tool_use -> tool_result -> final assistant reply\nif (!sd.history[chatId]) sd.history[chatId] = [];\nsd.history[chatId].push(\n  { role: 'assistant', content: [{ type: 'tool_use', id: ctx.tool_use_id, name: ctx.tool_name, input: ctx.tool_input }] },\n  { role: 'user',      content: [{ type: 'tool_result', tool_use_id: ctx.tool_use_id, content: toolResultContent }] }\n);\nif (finalText) {\n  sd.history[chatId].push({ role: 'assistant', content: finalText });\n}\nif (sd.history[chatId].length > 40) sd.history[chatId] = sd.history[chatId].slice(-40);\n\n// Chain: Claude wants another tool call\nif (nextToolBlock) {\n  const nextCmdId = nextToolBlock.id;\n  sd.tool_calls[nextCmdId] = {\n    tool_use_id:       nextToolBlock.id,\n    tool_name:         nextToolBlock.name,\n    tool_input:        nextToolBlock.input,\n    chat_id:           chatId,\n    messages_snapshot: [...sd.history[chatId]],\n    ts:                now\n  };\n  if (!sd.command_queue) sd.command_queue = [];\n  sd.command_queue.push({\n    command_id: nextCmdId, chat_id: chatId,\n    type: nextToolBlock.input.type, payload: nextToolBlock.input.payload || {}\n  });\n}\n\nconst reply = finalText || (nextToolBlock ? ('\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u044e: ' + nextToolBlock.input.type + '...') : 'Done');\n\nreturn [{ json: {\n  chatId, reply, isToolCall: true, commandType, authorized: true,\n  timedOutChats, hasChainedCommand: !!nextToolBlock\n} }];"
         },
         "id": "process-result",
         "name": "Process Result",
@@ -1926,6 +2148,75 @@
           }
         },
         "webhookId": "87de090d-b056-4608-9319-467dcdda40d8"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "leftValue": "={{ $json.isToolCall }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                }
+              }
+            ]
+          }
+        },
+        "id": "is-tool-call",
+        "name": "Is Tool Call?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          650,
+          1000
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "={{ $json.chatId }}",
+          "text": "={{ $json.reply }}",
+          "additionalFields": {}
+        },
+        "id": "send-tool-reply",
+        "name": "Send Tool Reply",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1,
+        "position": [
+          900,
+          860
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "Ie6tdHWYmxtqisex",
+            "name": "TELEGRAM_BOT_TOKEN"
+          }
+        },
+        "webhookId": "f43b15fa-ae49-414c-a287-db38b96ec0e3"
+      },
+      {
+        "parameters": {
+          "chatId": "={{ $json.timedOutChats[0] }}",
+          "text": "=\u23f3 \u041a\u043e\u043c\u0430\u043d\u0434\u0430 \u043d\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u0430 \u2014 \u0430\u0433\u0435\u043d\u0442 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u043b 5 \u043c\u0438\u043d\u0443\u0442.\n\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435, \u0437\u0430\u043f\u0443\u0449\u0435\u043d \u043b\u0438 DispatchAgent.exe.",
+          "additionalFields": {}
+        },
+        "id": "send-timeout-notify",
+        "name": "Send Timeout Notify",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1,
+        "position": [
+          900,
+          1200
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "Ie6tdHWYmxtqisex",
+            "name": "TELEGRAM_BOT_TOKEN"
+          }
+        },
+        "webhookId": "48f9edb9-1a3d-4307-96e9-485784e2c686"
       }
     ],
     "connections": {
@@ -2195,7 +2486,7 @@
         "main": [
           [
             {
-              "node": "Result Router",
+              "node": "Is Tool Call?",
               "type": "main",
               "index": 0
             }
@@ -2248,6 +2539,24 @@
             }
           ]
         ]
+      },
+      "Is Tool Call?": {
+        "main": [
+          [
+            {
+              "node": "Send Tool Reply",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Result Router",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "authors": "Adil M",
@@ -2256,10 +2565,10 @@
     "autosaved": false,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-04-26T16:16:40.238Z",
-        "id": 16,
+        "createdAt": "2026-04-28T11:13:17.033Z",
+        "id": 29,
         "workflowId": "aKwY0wZ238JbzR8J",
-        "versionId": "4e690450-9bcf-40e4-b7ee-8fe1b26e2d89",
+        "versionId": "9c11a16e-aeb3-45be-8e48-ef1b6c5a58e0",
         "event": "activated",
         "userId": "702916b2-e0a7-4f66-8938-6c70a727fb95"
       }
@@ -2280,5 +2589,5 @@
     "workflow:update",
     "workflow:updateRedactionSetting"
   ],
-  "checksum": "afabe217e7a84b3217bbe8dd796a6b57ada7d055e72f46b539097449d8633d27"
+  "checksum": "944b318b98f537d527a74a7c1b11bb951858156fcd73feee06c1844b4d4ae785"
 }
