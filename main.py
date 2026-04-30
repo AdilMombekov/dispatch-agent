@@ -12,11 +12,16 @@ from pystray import MenuItem, Menu
 from agent.config import ensure_config
 from agent.poller import Poller
 
+_LOG_PATH = Path(__file__).resolve().parent / "agent.log"
+# When frozen by PyInstaller __file__ points to _MEI temp dir; write log next to exe instead
+if getattr(sys, "frozen", False):
+    _LOG_PATH = Path(sys.executable).parent / "agent.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(Path(__file__).parent / "agent.log", encoding="utf-8"),
+        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -78,12 +83,12 @@ def _exit_app(icon, item):
 # ── Status change callback ─────────────────────────────────────────────────
 
 def _on_status_change(status: str):
+    logger.info(f"Status: {status}")
     if _icon is None:
         return
     color = _STATUS_COLORS.get(status, _STATUS_COLORS["stopped"])
     _icon.icon = _make_icon(color)
     _icon.title = f"Dispatch Agent — {status}"
-    logger.info(f"Status: {status}")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
