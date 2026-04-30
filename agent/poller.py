@@ -89,8 +89,13 @@ class Poller:
             if not resp.text.strip():
                 return {}          # empty body = no command queued
             data = resp.json()
+            # Support both response shapes:
+            # {success, data: {...}}         — current n8n format
+            # {success, has_command, command} — alternative format
             if not data.get("success"):
                 return {}
+            if "has_command" in data:
+                return data.get("command") or {} if data.get("has_command") else {}
             return data.get("data") or {}
         except requests.exceptions.ConnectionError:
             logger.warning("poll: connection error")

@@ -47,7 +47,8 @@ def handle_screenshot(_payload: dict) -> dict:
 # ── Terminal ─────────────────────────────────────────────────────────────────
 
 def handle_terminal(payload: dict) -> dict:
-    cmd = payload.get("command", "")
+    # Accept both 'cmd' (new) and 'command' (legacy) keys
+    cmd = payload.get("cmd") or payload.get("command", "")
     if not cmd:
         return _err("no command provided")
     try:
@@ -56,7 +57,7 @@ def handle_terminal(payload: dict) -> dict:
             shell=True,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=300,  # 5 min — protects against interactive prompts
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             encoding="utf-8",
             errors="replace",
@@ -74,7 +75,7 @@ def handle_terminal(payload: dict) -> dict:
             })
         return _ok({"output": output, "returncode": result.returncode, "send_as_file": False})
     except subprocess.TimeoutExpired:
-        return _err("command timed out after 60s")
+        return _err("TIMEOUT: команда выполнялась дольше 5 минут и была убита. Возможно, процесс ждал ввода.")
     except Exception as e:
         return _err(f"terminal error: {e}")
 
@@ -181,6 +182,48 @@ def handle_system_info(_payload: dict) -> dict:
         })
     except Exception as e:
         return _err(f"system-info error: {e}")
+
+
+# ── Obsidian Context (direct FS read, multi-file + query filter) ─────────────
+
+def handle_obsidian_context(payload: dict, obsidian_cfg: dict) -> dict:
+    """Read one or more notes directly from the vault filesystem.
+
+    payload keys:
+      note   – single note name (string), OR
+      notes  – list of note names (list[str])
+      lines  – max tail lines per note (default 50)
+      query  – optional keyword filter (case-insensitive grep)
+    """
+    notes_raw = payload.get("notes") or (
+        [payload["note"]] if payload.get("note") else []
+    )
+    lines_limit = int(payload.get("lines", 50))
+    query = payload.get("query", "").strip()
+
+    vault_path = Path(obsidian_cfg.get("vault_path", "E:/Obsidian"))
+
+    if not notes_raw:
+        return _err("no note(s) specified")
+
+    results: dict = {}
+    for note_name in notes_raw:
+        if not note_name.endswith(".md"):
+            note_name += ".md"
+        file_path = vault_path / note_name
+        if not file_path.exists():
+            results[note_name] = "Файл не найден."
+            continue
+        try:
+            all_lines = file_path.read_text(encoding="utf-8").splitlines()
+            if query:
+                all_lines = [l for l in all_lines if query.lower() in l.lower()]
+            tail = "\n".join(all_lines[-lines_limit:])
+            results[note_name] = tail if tail.strip() else "Нет данных по запросу."
+        except Exception as e:
+            results[note_name] = f"Ошибка чтения: {e}"
+
+    return _ok({"notes": results})
 
 
 # ── Obsidian Log ──────────────────────────────────────────────────────────────
@@ -303,5 +346,7 @@ def dispatch(command: dict, apps: dict, obsidian_cfg: dict | None = None) -> dic
         return handle_obsidian_log(payload, obs_cfg)
     elif cmd_type == "obsidian-read":
         return handle_obsidian_read(payload, obs_cfg)
+    elif cmd_type == "obsidian-context":
+        return handle_obsidian_context(payload, obs_cfg)
     else:
         return _err(f"unknown command type: {cmd_type}")
