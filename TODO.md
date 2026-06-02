@@ -281,6 +281,14 @@
 ---
 
 ### [ ] 12. Шаг 4 — computer-use для kind=click_gui
+> 🔧 **Готово к подключению (P3.13 уже сделан ДО этого шага):**
+> - `self._reviewer` (SonnetReviewer) + `is_destructive()` — вызывать перед каждым потенциально опасным tool-action в цикле (клик по «Удалить», ввод в терминал, закрытие приложений). deny → пропустить шаг.
+> - `self._budget` + dispatcher уже гейтит по дневному лимиту до старта задачи. Доп. computer-use токены пишутся через `record_run`.
+> - Emergency stop: предложено `state["dispatch_emergency_stop"]` — добавить команду `/stop` в бот, которая ставит флаг; ComputerUseClient проверяет его между шагами.
+> - `pyautogui` уже в requirements.txt.
+> - Модель/ключ: `ROUTER_MODEL` + `_active_anthropic_key()`, как в `_qa_executor`.
+> - ⚠️ Тестировать ТОЛЬКО когда юзер за экраном (перехват мыши).
+
 **Промпт:** Самый сложный шаг. Haiku с computer-use tool для GUI-задач. Юзер сидит у ПК и видит как курсор бегает (это норма — это его машина).
 
 Файлы:
