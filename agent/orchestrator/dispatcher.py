@@ -32,11 +32,19 @@ class Dispatcher:
         is_enabled: Callable[[], bool],
         report: Callable[[int, str], None],
         poll_interval: float = 2.0,
+        budget_ok: Optional[Callable[[], bool]] = None,
+        on_budget_block: Optional[Callable[[], None]] = None,
     ):
         self._q = queue
         self._is_enabled = is_enabled
         self._report = report
         self._poll = poll_interval
+        # budget_ok() → False pauses task execution (queue keeps filling).
+        self._budget_ok = budget_ok or (lambda: True)
+        # Called once each time we transition into a budget-blocked state, so the
+        # bot can notify the user without spamming every poll tick.
+        self._on_budget_block = on_budget_block or (lambda: None)
+        self._budget_blocked = False
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._executors: dict[str, Executor] = {}
@@ -66,6 +74,18 @@ class Dispatcher:
                 if not self._is_enabled():
                     self._stop.wait(self._poll)
                     continue
+                # Daily budget gate: pause (don't claim) when exhausted, and
+                # notify the user once on the OFF→blocked transition.
+                if not self._budget_ok():
+                    if not self._budget_blocked:
+                        self._budget_blocked = True
+                        try:
+                            self._on_budget_block()
+                        except Exception as e:
+                            logger.warning("on_budget_block failed: %s", e)
+                    self._stop.wait(self._poll)
+                    continue
+                self._budget_blocked = False
                 task = self._q.claim_next()
                 if task is None:
                     self._stop.wait(self._poll)

@@ -301,7 +301,17 @@
 
 ---
 
-### [ ] 13. Шаг 5 — SonnetReviewer + budget.py
+### [x] 13. Шаг 5 — SonnetReviewer + budget.py
+> ✅ Сделано 2026-06-02 (порядок изменён: сделано ДО P3.12 по принципу safety-first):
+> - `agent/orchestrator/budget.py` — `Budget` поверх `queue.cost_since(midnight)`. Дневной лимит из `config.daily_budget_usd` (default 7.0), читается live. Методы `allowed/today_spent/remaining/limit/fraction`. **Тест:** под лимитом allow, свыше — block.
+> - `agent/orchestrator/reviewer.py` — `SonnetReviewer.review()` (вердикт allow/deny, **fail-closed** на ошибке/мусоре) + `is_destructive()` (дешёвый префильтр: rm/force-push/.env/секреты/деньги/shutdown/…). **Тест:** парсинг JSON из прозы, fail-closed на garbage и исключении. **Реальный Sonnet-вызов:** деструктивный промпт корректно denied.
+> - Wiring: budget → Dispatcher (`budget_ok` пауза + `on_budget_block` уведомление owner один раз); reviewer → `_code_executor` pre-flight (деструктивные code-промпты идут на Sonnet, deny → задача падает). `_review_ask` reuse `_anthropic`+ANALYST_MODEL+`_add_cost`. Бюджет показан в `/dispatch`.
+> - `daily_budget_usd` добавлен в config.example.json.
+> - Все синтаксис-проверки + юнит-тесты зелёные.
+
+<details><summary>Исходный промпт</summary>
+
+### Шаг 5 — SonnetReviewer + budget.py
 **Промпт:** Защитная сетка: на destructive шагах перед действием Haiku Sonnet делает быстрое ревью.
 
 Файлы:
@@ -319,6 +329,8 @@
 Проверка:
 - Запустить click-задачу которая хочет `Remove-Item` — Sonnet должен заблокировать.
 - Запустить N qa-задач подряд, превысить дневной лимит — Dispatcher останавливается.
+
+</details>
 
 ---
 

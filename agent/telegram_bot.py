@@ -23,6 +23,8 @@ from agent.handlers import dispatch, run_claude_code_stream
 from agent.orchestrator.queue import TaskQueue
 from agent.orchestrator.dispatcher import Dispatcher
 from agent.orchestrator.router import classify
+from agent.orchestrator.budget import Budget, DEFAULT_DAILY_USD
+from agent.orchestrator.reviewer import SonnetReviewer, is_destructive
 from agent.paths import (
     DATA_DIR, STATE_PATH, CHATS_PATH, CLAUDE_TASK_PATH, CLAUDE_RUNS_PATH, INBOX_DIR,
 )
@@ -281,10 +283,20 @@ class TelegramBot:
         # are registered in later steps; until then the dispatcher stub-completes
         # tasks so the queue/commands are usable. Gated by state.dispatch_enabled.
         self._queue = TaskQueue()
+        # Daily orchestrator budget (separate from monthly chat meter). Limit
+        # read live from config so /setlimit-style changes apply without restart.
+        self._budget = Budget(
+            self._queue,
+            limit_provider=lambda: float(
+                (self._cfg.get("daily_budget_usd") if self._cfg else None) or DEFAULT_DAILY_USD),
+        )
+        self._reviewer = SonnetReviewer(ask=self._review_ask)
         self._dispatcher = Dispatcher(
             self._queue,
             is_enabled=lambda: bool(self._state.get("dispatch_enabled", False)),
             report=lambda chat_id, text: self._send_message(chat_id, text),
+            budget_ok=self._budget.allowed,
+            on_budget_block=self._notify_budget_block,
         )
         # qa → Haiku (P3.10), code → claude CLI (P3.11). click_gui/scheduled
         # wired in later steps; until then the dispatcher stub-completes them.
@@ -704,10 +716,12 @@ class TelegramBot:
         else:
             on = bool(self._state.get("dispatch_enabled", False))
             queued = len(self._queue.list(status="queued", limit=100))
+            spent, limit = self._budget.today_spent(), self._budget.limit()
             self._send_message(
                 chat_id,
                 f"🤖 Dispatch: {'🟢 ВКЛ' if on else '⏸ ВЫКЛ'}\n"
-                f"В очереди: {queued}\n\n"
+                f"В очереди: {queued}\n"
+                f"Бюджет сегодня: ${spent:.4f} / ${limit:.2f}\n\n"
                 "Команды: /dispatch on · /dispatch off")
 
     def _cmd_enqueue(self, chat_id, prompt: str, force_kind: str | None = None):
@@ -828,6 +842,15 @@ class TelegramBot:
         is not wired yet — until then, code tasks execute unguarded. dispatch is
         OFF by default and opt-in, so this only runs when the user enables it.
         """
+        # Safety gate (P3.13): destructive-looking prompts get a Sonnet verdict
+        # before claude runs trusted. Cheap/safe prompts skip the (paid) review.
+        if is_destructive(task.prompt):
+            verdict = self._reviewer.review(
+                f"claude -p (trusted): {task.prompt}",
+                context=f"cwd={self._claude_dev_root()}")
+            if verdict.get("verdict") == "deny":
+                self._queue.record_run(task.id, "claude-cli", ok=False)
+                raise RuntimeError(f"заблокировано ревьюером: {verdict.get('reason')}")
         payload = {
             "prompt": task.prompt,
             "model": "sonnet",
@@ -850,6 +873,37 @@ class TelegramBot:
         out = (data.get("result") or "").strip() or "(claude вернул пустой результат)"
         # Telegram hard-caps messages near 4096 chars; trim long CLI output.
         return out[:3500] + ("…" if len(out) > 3500 else "")
+
+    def _review_ask(self, system: str, user: str) -> str:
+        """Sonnet call for the SonnetReviewer. Reuses _anthropic + spend meter."""
+        api_key = self._active_anthropic_key()
+        if not api_key:
+            raise RuntimeError("нет anthropic_api_keys для ревью")
+        resp = self._anthropic(
+            api_key, [{"role": "user", "content": user}],
+            model=ANALYST_MODEL, system=system, tools=None, max_tokens=300)
+        usage = resp.get("usage", {}) or {}
+        self._add_cost(ANALYST_MODEL, usage)
+        self._save_state()
+        parts = [
+            b.get("text", "") for b in (resp.get("content") or [])
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        return "\n".join(p for p in parts if p).strip()
+
+    def _notify_budget_block(self) -> None:
+        """One-shot ping when the daily orchestrator budget is exhausted."""
+        owner = self._state.get("owner_chat_id")
+        if not owner:
+            return
+        try:
+            self._send_message(
+                owner,
+                f"🚫 Дневной лимит оркестратора ${self._budget.limit():.2f} исчерпан "
+                f"(потрачено ${self._budget.today_spent():.4f}). Задачи ждут до "
+                "полуночи или подними `daily_budget_usd` в config.json.")
+        except Exception as e:
+            logger.warning(f"budget-block notify failed: {e}")
 
     # All skill names the bot routes (top-level tools + queue_agent_command sub-types).
     # Used by /skills to render the toggle keyboard; must stay in sync with TOOLS.

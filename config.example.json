@@ -13,6 +13,7 @@
   },
   "autostart": false,
   "api_limit_usd": 5.0,
+  "daily_budget_usd": 7.0,
   "openai_api_key": "",
   "qdrant_url": "",
   "qdrant_api_key": "",
