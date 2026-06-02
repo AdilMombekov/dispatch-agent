@@ -230,7 +230,8 @@
 - В `dispatcher.py` заменить фейк на `if task.kind == "qa": result, run = self.haiku.qa(task.prompt)`. Записать `run` в таблицу `runs`. Остальные `kind` пока возвращают «не реализовано».
 
 Конфиг:
-- API ключ в `config.json` под ключом `anthropic_api_key`. Если ключа нет — Dispatcher логирует `[WARN] no anthropic_api_key, qa tasks will fail` и помечает qa-задачи failed.
+- ⚠️ **Поправка (проверено 2026-06-02):** ключ лежит в `config.json` → `anthropic_api_keys` (МАССИВ, не строка; сейчас 1 элемент). Брать `cfg["anthropic_api_keys"][active_account-1]` или `[0]`. Не выдумывать новый `anthropic_api_key`. Если массив пуст — `[WARN]` + qa-задачи failed.
+- Лимит трат уже есть: `config.json → api_limit_usd` + `state["spend"]`. Переиспользовать для budget (P3.13), не плодить второй счётчик.
 
 Проверка:
 - `/q сколько будет 2+2` → через несколько секунд приходит ответ от Haiku, в БД есть запись в `runs` с tokens/cost.
