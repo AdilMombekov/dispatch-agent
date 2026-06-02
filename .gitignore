@@ -12,6 +12,9 @@ chats.json
 backup_index.json
 claude_task.json
 claude_runs.jsonl
+tasks.db
+tasks.db-wal
+tasks.db-shm
 inbox/
 
 # Logs

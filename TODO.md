@@ -121,7 +121,17 @@
 
 ## 🟡 P2 — техдолг и уборка
 
-### [ ] 6. Коммит и пуш текущих изменений
+### [x] 6. Коммит и пуш текущих изменений
+> ✅ Сделано 2026-06-02:
+> - Создана ветка `chore/stabilize-and-cleanup` (от main, т.к. нельзя коммитить напрямую в default).
+> - 5 логических коммитов: (A) rm n8n leftovers, (B) telegram bot + paths, (C) backup daemon + deps + spec, (D) stability: singleton/watchdog/log-rotation, (E) gitignore + archive + TODO.md.
+> - Запушено в `origin`.
+> - ⏳ **PR создать вручную** (`gh` CLI не установлен): открыть https://github.com/AdilMombekov/dispatch-agent/pull/new/chore/stabilize-and-cleanup — или смержить ветку локально (`git checkout main; git merge chore/stabilize-and-cleanup`).
+> - **НЕ закоммичено намеренно:** `agent_os_app/`, `agent_os_tabs/`, `agent_os_control_center.html`, `demo/` — отдельные решения.
+> - ⚠️ **Безопасность:** в `.git/config` remote URL содержит GitHub PAT (`gho_…`) в открытом виде. Только локально (не в репо), но стоит ротировать токен.
+
+<details><summary>Исходный промпт</summary>
+
 **Промпт:** В `git status` болтаются крупные незакоммиченные правки (см. начало сессии):
 - `M agent/config.py`, `M agent/handlers.py`, `M main.py`, `M requirements.txt`
 - `D agent/poller.py` (удалён вместе с n8n)
@@ -135,6 +145,8 @@
    - **Коммит D:** "fix(telegram_bot): callback expiry + offset persistence (anti restart-loop)" — это уже **в этой сессии** сделанные правки.
 2. Сделать PR в main (или закоммитить напрямую в main — на усмотрение).
 3. **Не коммитить:** `config.json.bak`, `config.json.broken-27.05`, `agent_state.json`, `chats.json`, `_npm_start.*`, `build_log.txt`, `agent-os-*.zip`, `agent_os_app/`, `demo/`, `inbox/`. Это либо локальный state, либо мусор. См. P2 #7.
+
+</details>
 
 ---
 
@@ -163,7 +175,17 @@
 
 > Архитектура согласована. Реализация в папке `agent/orchestrator/`. Каждый шаг — отдельный коммит и тестируемый чекпойнт.
 
-### [ ] 9. Шаг 1 — шасси: SQLite-очередь + Dispatcher-worker + Telegram-команды
+### [x] 9. Шаг 1 — шасси: SQLite-очередь + Dispatcher-worker + Telegram-команды
+> ✅ Сделано 2026-06-02:
+> - `agent/orchestrator/queue.py` — `TaskQueue` (SQLite, WAL, потокобезопасно). Методы: `enqueue/claim_next/mark_done/mark_failed/cancel/record_run/get/list/cost_since`. Таблицы `tasks`+`runs`. Recovery орфанов (running→queued при рестарте). **Юнит-тест зелёный** (FIFO, cancel-guard, cost-sum, recovery).
+> - `agent/orchestrator/dispatcher.py` — worker-тред с инъекцией `is_enabled`/`report`. Роутинг по `kind` через `register()`; стаб-фоллбэк для неподключённых исполнителей. **Интеграционный тест зелёный** (стаб, кастомный executor, тоггл ON/OFF).
+> - `agent/orchestrator/router.py` — `classify()` (эвристика qa/code/click_gui). **Создан раньше плана** (был нужен для `/q`); Haiku-классификатор остаётся в P3.10. **Тест 7/7**.
+> - Интеграция в `telegram_bot.py`: команды `/q <prompt>`, `/tasks`, `/cancel <id>`, `/dispatch [on|off]`. Очередь+dispatcher создаются в `__init__`, стартуют/стопаются в `start()/stop()`. `dispatch_enabled` в state (default **OFF** — юзер опт-ин). report = `_send_message`.
+> - **Отклонение от плана:** dispatcher стартует внутри `bot.start()`, а не в `main.py` (чище инкапсуляция) — main.py не трогал.
+> - `tasks.db*` добавлены в .gitignore. Все файлы компилируются, модуль импортируется чисто.
+> - ⚠️ Заработает только после рестарта агента (P0.1).
+
+<details><summary>Исходный промпт</summary>
 **Промпт:** Базовый каркас без AI. Цель — чтобы можно было ставить задачи в очередь, видеть их статус, переключать Dispatch ON/OFF.
 
 Файлы:
@@ -189,6 +211,8 @@
 - `/q hello` → ответ с id, через ~2 сек статус становится `done`.
 - Если `Dispatch: OFF` — задачи копятся в `queued`, не выполняются.
 - Перезапуск агента — задачи в БД сохраняются.
+
+</details>
 
 ---
 

@@ -20,6 +20,9 @@ import requests
 
 from agent.config import load_config, save_config, get_chrome_profiles, rescan_apps
 from agent.handlers import dispatch, run_claude_code_stream
+from agent.orchestrator.queue import TaskQueue
+from agent.orchestrator.dispatcher import Dispatcher
+from agent.orchestrator.router import classify
 from agent.paths import (
     DATA_DIR, STATE_PATH, CHATS_PATH, CLAUDE_TASK_PATH, CLAUDE_RUNS_PATH, INBOX_DIR,
 )
@@ -267,12 +270,25 @@ class TelegramBot:
         self._active_claude_proc: dict[str, object] = {}
         self._state = self._load_state()
 
+        # Orchestrator: task queue + worker. Executors (Haiku/CLI/computer-use)
+        # are registered in later steps; until then the dispatcher stub-completes
+        # tasks so the queue/commands are usable. Gated by state.dispatch_enabled.
+        self._queue = TaskQueue()
+        self._dispatcher = Dispatcher(
+            self._queue,
+            is_enabled=lambda: bool(self._state.get("dispatch_enabled", False)),
+            report=lambda chat_id, text: self._send_message(chat_id, text),
+        )
+
     # ── State persistence (spend, active account) ───────────────────────────
 
     def _load_state(self) -> dict:
         defaults = {
             "spend": {"total_usd": 0.0, "limit_usd": 5.0, "anthropic_usd": 0.0, "openai_usd": 0.0},
             "active_account": 1,
+            # Orchestrator master switch. OFF by default: the user opts in with
+            # /dispatch on. While OFF, /q tasks queue up but nothing executes.
+            "dispatch_enabled": False,
         }
         try:
             if STATE_PATH.exists():
@@ -335,9 +351,14 @@ class TelegramBot:
         self._sched_thread = threading.Thread(target=self._scheduler_run, daemon=True,
                                               name="AppScanScheduler")
         self._sched_thread.start()
+        self._dispatcher.start()
 
     def stop(self):
         self._stop.set()
+        try:
+            self._dispatcher.stop()
+        except Exception as e:
+            logger.warning(f"dispatcher stop failed: {e}")
 
     @property
     def status(self) -> str:
@@ -620,6 +641,14 @@ class TelegramBot:
                 f"Anthropic: ${sp['anthropic_usd']:.4f}")
         elif cmd == "/rescan":
             self._trigger_rescan(chat_id)
+        elif cmd == "/dispatch":
+            self._cmd_dispatch_toggle(chat_id, parts[1].lower() if len(parts) > 1 else None)
+        elif cmd == "/q":
+            self._cmd_enqueue(chat_id, text[len(parts[0]):].strip())
+        elif cmd == "/tasks":
+            self._cmd_list_tasks(chat_id)
+        elif cmd == "/cancel":
+            self._cmd_cancel_task(chat_id, parts[1] if len(parts) > 1 else None)
         elif cmd == "/claude":
             self._claude_show_folders(chat_id)
         elif cmd == "/update":
@@ -643,8 +672,79 @@ class TelegramBot:
             self._send_message(
                 chat_id,
                 f"❌ Неизвестная команда: `{cmd}`\n\n"
-                "Доступно: /start /claude /history /skills /update /spend /setlimit /resetspend /rescan /help",
+                "Доступно: /start /q /tasks /cancel /dispatch /claude /history /skills "
+                "/update /spend /setlimit /resetspend /rescan /help",
                 parse_mode="Markdown")
+
+    # ── Orchestrator commands (P3.9) ─────────────────────────────────────────
+
+    def _cmd_dispatch_toggle(self, chat_id, arg: str | None):
+        """/dispatch [on|off] — master switch for the task orchestrator."""
+        if arg in ("on", "вкл", "1", "true"):
+            self._state["dispatch_enabled"] = True
+            self._save_state()
+            self._send_message(chat_id, "🟢 Dispatch ВКЛЮЧЕН — задачи из очереди выполняются.")
+        elif arg in ("off", "выкл", "0", "false"):
+            self._state["dispatch_enabled"] = False
+            self._save_state()
+            self._send_message(chat_id, "⏸ Dispatch ВЫКЛЮЧЕН — задачи копятся, но не выполняются.")
+        else:
+            on = bool(self._state.get("dispatch_enabled", False))
+            queued = len(self._queue.list(status="queued", limit=100))
+            self._send_message(
+                chat_id,
+                f"🤖 Dispatch: {'🟢 ВКЛ' if on else '⏸ ВЫКЛ'}\n"
+                f"В очереди: {queued}\n\n"
+                "Команды: /dispatch on · /dispatch off")
+
+    def _cmd_enqueue(self, chat_id, prompt: str):
+        """/q <prompt> — classify and queue a task for the orchestrator."""
+        if not prompt:
+            self._send_message(chat_id, "Использование: /q <что сделать>\nНапример: /q сколько будет 2+2")
+            return
+        kind = classify(prompt)
+        task_id = self._queue.enqueue(chat_id, kind, prompt)
+        enabled = bool(self._state.get("dispatch_enabled", False))
+        tail = "" if enabled else "\n⏸ Dispatch выключен — включи /dispatch on, чтобы выполнить."
+        self._send_message(chat_id, f"🟢 Задача #{task_id} ({kind}) в очереди.{tail}")
+
+    _STATUS_EMOJI = {
+        "queued": "⏳", "running": "🔄", "done": "✅",
+        "failed": "❌", "cancelled": "🚫", "scheduled": "📅",
+    }
+
+    def _cmd_list_tasks(self, chat_id):
+        """/tasks — show the last 10 tasks with status."""
+        tasks = self._queue.list(limit=10)
+        if not tasks:
+            self._send_message(chat_id, "Очередь пуста. Поставить задачу: /q <что сделать>")
+            return
+        lines = ["📋 Последние задачи:"]
+        for t in tasks:
+            em = self._STATUS_EMOJI.get(t.status, "•")
+            prompt = (t.prompt[:40] + "…") if len(t.prompt) > 40 else t.prompt
+            lines.append(f"{em} #{t.id} [{t.kind}] {prompt}")
+        lines.append("\nОтменить: /cancel <id>")
+        self._send_message(chat_id, "\n".join(lines))
+
+    def _cmd_cancel_task(self, chat_id, arg: str | None):
+        """/cancel <id> — cancel a queued/running task."""
+        try:
+            task_id = int(arg)
+        except (TypeError, ValueError):
+            self._send_message(chat_id, "Использование: /cancel <номер задачи>")
+            return
+        t = self._queue.get(task_id)
+        if not t:
+            self._send_message(chat_id, f"Задача #{task_id} не найдена.")
+            return
+        if t.chat_id != chat_id:
+            self._send_message(chat_id, f"Задача #{task_id} не твоя.")
+            return
+        if self._queue.cancel(task_id):
+            self._send_message(chat_id, f"🚫 Задача #{task_id} отменена.")
+        else:
+            self._send_message(chat_id, f"Задача #{task_id} уже завершена ({t.status}), отменять нечего.")
 
     # All skill names the bot routes (top-level tools + queue_agent_command sub-types).
     # Used by /skills to render the toggle keyboard; must stay in sync with TOOLS.
