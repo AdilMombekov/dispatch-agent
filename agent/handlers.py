@@ -1,10 +1,15 @@
 """Command handlers — each returns {"success": bool, "data": ..., "error": str|None}."""
 import base64
 import io
+import json
+import mimetypes
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -22,26 +27,120 @@ def _err(msg: str) -> dict:
 
 # ── Screenshot ──────────────────────────────────────────────────────────────
 
+def _capture_resized(max_size: int = 1280):
+    """Grab primary monitor, resize to max_size, return (b64_jpeg, img_w, img_h, real_w, real_h)."""
+    import mss
+
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]  # primary monitor
+        raw = sct.grab(monitor)
+        img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+
+    real_w, real_h = img.width, img.height
+    if img.width > max_size or img.height > max_size:
+        img.thumbnail((max_size, max_size), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return b64, img.width, img.height, real_w, real_h
+
+
 def handle_screenshot(_payload: dict) -> dict:
     try:
-        import mss
-        import mss.tools
-
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]  # primary monitor
-            raw = sct.grab(monitor)
-            img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-
-        max_size = 1280
-        if img.width > max_size or img.height > max_size:
-            img.thumbnail((max_size, max_size), Image.LANCZOS)
-
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=75)
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        return _ok({"image": b64, "width": img.width, "height": img.height})
+        b64, w, h, _, _ = _capture_resized()
+        return _ok({"image": b64, "width": w, "height": h})
     except Exception as e:
         return _err(f"screenshot failed: {e}")
+
+
+# ── Computer control (mouse / keyboard) — computer-use level ─────────────────
+
+def _normalize_coords(payload: dict) -> None:
+    """Mutate payload so payload['x'] and payload['y'] are plain numbers.
+
+    Haiku-class routers sometimes pack coords as a single string ("920, 10"),
+    a list ([920,10]), or under names like `coordinate`/`coordinates`. Accept
+    those rather than erroring — the schema still says x/y separately, but a
+    forgiving handler beats a frustrating chat loop."""
+    def _split_pair(v):
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            return v[0], v[1]
+        if isinstance(v, str) and "," in v:
+            parts = [p.strip() for p in v.split(",", 1)]
+            if len(parts) == 2:
+                return parts[0], parts[1]
+        return None
+
+    # Case 1: x or y itself is the pair (e.g. {"x": "920, 10"}).
+    for key in ("x", "y"):
+        pair = _split_pair(payload.get(key))
+        if pair is not None:
+            payload["x"], payload["y"] = pair
+            return
+
+    # Case 2: a sibling key carries the pair.
+    for alt in ("coordinate", "coordinates", "coord", "coords", "xy", "position"):
+        pair = _split_pair(payload.get(alt))
+        if pair is not None:
+            payload["x"], payload["y"] = pair
+            return
+
+
+def handle_computer(payload: dict) -> dict:
+    """Control mouse/keyboard and return a fresh screenshot so the model can see.
+
+    Coordinates (x, y) are interpreted in the SCREENSHOT pixel space (downscaled
+    to max 1280) and scaled up to the real screen, so the model can click on what
+    it sees in the image it received.
+    """
+    try:
+        import pyautogui
+        pyautogui.FAILSAFE = False
+
+        action = payload.get("action", "")
+        _normalize_coords(payload)
+        real_w, real_h = pyautogui.size()
+        longest = max(real_w, real_h)
+        scale = longest / min(longest, 1280)  # image-space -> real-screen factor
+
+        def to_real(x, y):
+            return int(round(float(x) * scale)), int(round(float(y) * scale))
+
+        if action == "screenshot":
+            pass
+        elif action in ("left_click", "right_click", "double_click", "move"):
+            if payload.get("x") is None or payload.get("y") is None:
+                return _err("x and y required for this action")
+            rx, ry = to_real(payload["x"], payload["y"])
+            pyautogui.moveTo(rx, ry, duration=0.1)
+            if action == "left_click":
+                pyautogui.click(rx, ry)
+            elif action == "right_click":
+                pyautogui.click(rx, ry, button="right")
+            elif action == "double_click":
+                pyautogui.doubleClick(rx, ry)
+        elif action == "type":
+            pyautogui.write(payload.get("text", ""), interval=0.02)
+        elif action == "key":
+            keys = (payload.get("keys") or payload.get("key") or "").strip()
+            if not keys:
+                return _err("keys required for action=key")
+            if "+" in keys:
+                pyautogui.hotkey(*[k.strip() for k in keys.split("+")])
+            else:
+                pyautogui.press(keys)
+        elif action == "scroll":
+            pyautogui.scroll(int(payload.get("amount", -400)))
+        else:
+            return _err(f"unknown computer action: {action}")
+
+        time.sleep(0.5)  # let the UI settle before capturing
+        b64, w, h, rw, rh = _capture_resized()
+        return _ok({"action": action, "image": b64, "width": w, "height": h,
+                    "screen_width": rw, "screen_height": rh})
+    except Exception as e:
+        return _err(f"computer error: {e}")
 
 
 # ── Terminal ─────────────────────────────────────────────────────────────────
@@ -59,7 +158,8 @@ def handle_terminal(payload: dict) -> dict:
             text=True,
             timeout=300,  # 5 min — protects against interactive prompts
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-            encoding="utf-8",
+            # cmd.exe writes in the console OEM codepage (e.g. cp866), not UTF-8
+            encoding="oem" if sys.platform == "win32" else "utf-8",
             errors="replace",
         )
         output = result.stdout + result.stderr
@@ -321,6 +421,423 @@ def handle_obsidian_read(payload: dict, obsidian_cfg: dict) -> dict:
         return _err(f"obsidian read error: {e}")
 
 
+# ── Send File ─────────────────────────────────────────────────────────────────
+
+def handle_send_file(payload: dict) -> dict:
+    # Accept several aliases the router model sometimes invents instead of `filepath`.
+    filepath = (payload.get("filepath") or payload.get("path")
+                or payload.get("file") or payload.get("file_path") or "").strip()
+    if not filepath:
+        return _err("no filepath provided")
+    path = Path(filepath)
+    if not path.exists():
+        return _err(f"file not found: {filepath}")
+    if not path.is_file():
+        return _err(f"not a file: {filepath}")
+    size = path.stat().st_size
+    if size > 50 * 1024 * 1024:
+        return _err(f"file too large ({size // 1024 // 1024} MB); limit is 50 MB")
+    try:
+        mime_type, _ = mimetypes.guess_type(str(path))
+        if not mime_type:
+            mime_type = "application/octet-stream"
+        raw = path.read_bytes()
+        file_base64 = base64.b64encode(raw).decode()
+        return _ok({
+            "filename": path.name,
+            "mime_type": mime_type,
+            "file_base64": file_base64,
+        })
+    except Exception as e:
+        return _err(f"send-file error: {e}")
+
+
+# ── Delegate to Claude Code (claude -p, on subscription) ─────────────────────
+
+def _resolve_perm(payload: dict) -> str:
+    """Pick claude -p permission mode based on caller-supplied trust signal.
+
+    payload.trusted=True  → bypassPermissions (full autonomy: edits + shell).
+    payload.trusted=False → acceptEdits        (edits only; safer default).
+    Legacy: payload.cautious=True forces non-trusted regardless of `trusted`.
+    """
+    trusted = bool(payload.get("trusted", False))
+    if payload.get("cautious"):
+        trusted = False
+    return "bypassPermissions" if trusted else "acceptEdits"
+
+
+def run_claude_code_stream(payload: dict, on_event=None, on_proc=None) -> dict:
+    """Same as handle_run_claude_code but with `--output-format stream-json`
+    so we can surface progress to Telegram chunk-by-chunk.
+
+    `on_event(evt)` is called with each parsed JSON event from stdout.
+    `on_proc(p)`    is called once with the subprocess.Popen instance right
+                    after spawn, so the caller can hand the user a kill button.
+    Returns the same shape as handle_run_claude_code: {"success", "data": {result, cost_usd, model, num_turns}, ...}.
+    """
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return _err("no prompt provided")
+    model = (payload.get("model") or "sonnet").strip()
+    cwd = payload.get("cwd") or None
+    if cwd and not Path(cwd).is_dir():
+        return _err(f"cwd not found: {cwd}")
+    perm = _resolve_perm(payload)
+    config_dir = payload.get("config_dir") or None
+    timeout = int(payload.get("timeout", 1800))
+
+    claude = shutil.which("claude")
+    if not claude:
+        return _err("claude CLI not found on PATH")
+
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    if config_dir:
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+
+    # stream-json + --verbose: NDJSON on stdout, one event per line.
+    args = [claude, "-p", prompt, "--model", model,
+            "--permission-mode", perm,
+            "--output-format", "stream-json", "--verbose"]
+    try:
+        proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, cwd=cwd, text=True, encoding="utf-8", errors="replace",
+            bufsize=1,  # line-buffered
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except Exception as e:
+        return _err(f"claude -p не запустился: {e}")
+
+    if on_proc:
+        try:
+            on_proc(proc)
+        except Exception as e:
+            # Caller's bookkeeping shouldn't break the run — just log.
+            import logging
+            logging.getLogger(__name__).warning(f"on_proc callback failed: {e}")
+
+    # Drain stderr in a daemon thread so the OS pipe never fills and blocks
+    # the child on stderr write (which would also stall our stdout readline).
+    stderr_chunks: list[str] = []
+    def _drain_stderr():
+        try:
+            for ln in iter(proc.stderr.readline, ""):
+                stderr_chunks.append(ln)
+        except Exception:
+            pass
+    threading.Thread(target=_drain_stderr, daemon=True, name="claude-stderr").start()
+
+    # Hard wall-clock kill: fires even when readline() is blocked on a silent
+    # hang (the in-loop timeout check only runs after each new stdout line).
+    timed_out = {"v": False}
+    def _hard_kill():
+        timed_out["v"] = True
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    watchdog = threading.Timer(timeout, _hard_kill)
+    watchdog.daemon = True
+    watchdog.start()
+
+    final = {"result": "", "cost_usd": None, "model": model, "num_turns": None}
+    started = time.time()
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(evt, dict):
+                continue
+            if on_event:
+                try:
+                    on_event(evt)
+                except Exception:
+                    pass  # don't let UI errors kill the run
+            if evt.get("type") == "result":
+                final["result"]   = evt.get("result", "") or ""
+                final["cost_usd"] = evt.get("total_cost_usd")
+                final["num_turns"] = evt.get("num_turns")
+                if evt.get("is_error") or evt.get("subtype") not in (None, "success"):
+                    watchdog.cancel()
+                    return _err(f"claude -p: {final['result'] or evt.get('subtype')}")
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        watchdog.cancel()
+        return _err("claude -p не завершился после закрытия stdout")
+    except Exception as e:
+        proc.kill()
+        watchdog.cancel()
+        return _err(f"claude -p stream error: {e}")
+    finally:
+        watchdog.cancel()
+
+    if timed_out["v"]:
+        return _err(f"claude -p превысил таймаут {timeout}s")
+    if proc.returncode != 0 and not final["result"]:
+        err = "".join(stderr_chunks)
+        return _err(f"claude -p rc={proc.returncode}: {err[:500]}")
+    return _ok(final)
+
+
+def handle_run_claude_code(payload: dict) -> dict:
+    """Delegate a heavy task to Claude Code via `claude -p`.
+
+    Runs on the user's SUBSCRIPTION (OAuth), not the paid per-token API:
+    ANTHROPIC_API_KEY is stripped from the child env so Claude Code falls back
+    to its logged-in account. `config_dir` selects which logged-in account to
+    use via CLAUDE_CONFIG_DIR (for multi-account switching).
+    """
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return _err("no prompt provided")
+
+    model = (payload.get("model") or "sonnet").strip()
+    cwd = payload.get("cwd") or None
+    if cwd and not Path(cwd).is_dir():
+        return _err(f"cwd not found: {cwd}")
+    # Permission resolution: trusted cwds (allowlisted, or interactively picked
+    # via /claude) get bypassPermissions for full autonomy; everything else
+    # falls back to acceptEdits — claude -p can still edit files but no auto-shell.
+    perm = _resolve_perm(payload)
+    config_dir = payload.get("config_dir") or None
+    timeout = int(payload.get("timeout", 900))
+
+    claude = shutil.which("claude")
+    if not claude:
+        return _err("claude CLI not found on PATH")
+
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)  # force subscription auth, not paid API
+    if config_dir:
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+
+    args = [claude, "-p", prompt, "--model", model,
+            "--permission-mode", perm, "--output-format", "json"]
+    try:
+        r = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd,
+            encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except subprocess.TimeoutExpired:
+        return _err(f"claude -p превысил таймаут {timeout}s")
+    except Exception as e:
+        return _err(f"claude -p не запустился: {e}")
+
+    out = (r.stdout or "").strip()
+    try:
+        parsed = json.loads(out)
+    except json.JSONDecodeError:
+        if r.returncode != 0:
+            return _err(f"claude -p rc={r.returncode}: {(r.stderr or out)[:500]}")
+        return _ok({"result": out[:6000], "cost_usd": None, "model": model})
+
+    if parsed.get("is_error") or parsed.get("subtype") not in (None, "success"):
+        return _err(f"claude -p: {parsed.get('result') or parsed.get('subtype')}")
+    return _ok({
+        "result": parsed.get("result", "") or "",
+        "cost_usd": parsed.get("total_cost_usd"),
+        "model": model,
+        "num_turns": parsed.get("num_turns"),
+    })
+
+
+# ── Read / extract text from any document format ─────────────────────────────
+
+_PLAIN_TEXT_EXTS = {
+    ".txt", ".md", ".markdown", ".csv", ".tsv", ".log", ".json", ".yaml", ".yml",
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".h", ".hpp",
+    ".cs", ".go", ".rs", ".rb", ".php", ".sql", ".sh", ".ps1", ".bat", ".ini",
+    ".cfg", ".conf", ".toml", ".env", ".srt", ".vtt",
+}
+
+
+def _read_text_file(path: Path) -> str:
+    for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+        try:
+            return path.read_text(encoding=enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return path.read_bytes().decode("utf-8", errors="replace")
+
+
+def _looks_binary(path: Path, sniff: int = 8192) -> bool:
+    """Sniff raw bytes to decide if a file is binary. Done on bytes (not via the
+    all-accepting latin-1 decode) so binaries are routed to the claude -p fallback
+    instead of returning mojibake."""
+    chunk = path.read_bytes()[:sniff]
+    if not chunk:
+        return False  # empty -> treat as (trivial) text
+    if b"\x00" in chunk:
+        return True
+    # text in any encoding has few control chars; lots of them => binary
+    control = sum(1 for b in chunk if b < 0x09 or 0x0e <= b <= 0x1f)
+    return control / len(chunk) > 0.30
+
+
+def _extract_pdf(path: Path) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    return "\n".join((pg.extract_text() or "") for pg in reader.pages)
+
+
+def _extract_docx(path: Path) -> str:
+    import docx
+    doc = docx.Document(str(path))
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            parts.append("\t".join(c.text for c in row.cells))
+    return "\n".join(parts)
+
+
+def _extract_xlsx(path: Path) -> str:
+    import openpyxl
+    wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    out = []
+    try:
+        for ws in wb.worksheets:
+            out.append(f"# Лист: {ws.title}")
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) for c in row if c is not None]
+                if cells:
+                    out.append("\t".join(cells))
+    finally:
+        wb.close()
+    return "\n".join(out)
+
+
+def _extract_pptx(path: Path) -> str:
+    from pptx import Presentation
+    prs = Presentation(str(path))
+    out = []
+    for i, slide in enumerate(prs.slides, 1):
+        out.append(f"# Слайд {i}")
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    txt = "".join(r.text for r in para.runs)
+                    if txt.strip():
+                        out.append(txt)
+            if shape.has_table:
+                for row in shape.table.rows:
+                    out.append("\t".join(c.text for c in row.cells))
+    return "\n".join(out)
+
+
+def _extract_html(path: Path) -> str:
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(_read_text_file(path), "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text("\n", strip=True)
+
+
+def _extract_xml(path: Path) -> str:
+    raw = _read_text_file(path)
+    try:
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(raw)
+        parts = []
+        for el in root.iter():
+            txt = (el.text or "").strip()
+            if txt:
+                tag = el.tag.split("}")[-1]  # strip namespace
+                parts.append(f"{tag}: {txt}")
+        return "\n".join(parts) or raw
+    except Exception:
+        return raw
+
+
+def _extract_rtf(path: Path) -> str:
+    from striprtf.striprtf import rtf_to_text
+    return rtf_to_text(_read_text_file(path))
+
+
+def _read_via_claude(path: Path) -> dict:
+    """Fallback for formats with no native extractor (.doc/.xls/.ppt/odf/etc.):
+    delegate reading to Claude Code, which can shell out to convert them."""
+    res = handle_run_claude_code({
+        "prompt": (f"Прочитай файл {path} и верни ТОЛЬКО его текстовое содержимое, "
+                   "без своих комментариев. Если это таблица/презентация/документ — "
+                   "извлеки весь читаемый текст."),
+        "cwd": str(path.parent),
+        "model": "sonnet",
+        "cautious": True,
+    })
+    if res.get("success"):
+        text = res["data"].get("result", "")
+        return _ok({"filename": path.name, "ext": path.suffix.lower(),
+                    "chars": len(text), "truncated": False, "text": text,
+                    "via": "claude-code"})
+    return res
+
+
+def handle_read_document(payload: dict) -> dict:
+    """Extract text from virtually any document format.
+
+    Native extractors for pdf/docx/xlsx/pptx/html/xml/rtf + all plain-text types;
+    legacy/binary office (.doc/.xls/.ppt) and unknown binaries fall back to
+    Claude Code. Returns text (truncated to max_chars for chat)."""
+    # Same alias-tolerance as send-file — Haiku occasionally swaps in `path` etc.
+    fp = (payload.get("filepath") or payload.get("path")
+          or payload.get("file") or payload.get("file_path") or "").strip()
+    if not fp:
+        return _err("no filepath provided")
+    path = Path(fp)
+    if not path.exists():
+        return _err(f"file not found: {fp}")
+    if not path.is_file():
+        return _err(f"not a file: {fp}")
+
+    max_chars = int(payload.get("max_chars", 20000))
+    ext = path.suffix.lower()
+    fallback_exts = {".doc", ".xls", ".ppt", ".odt", ".ods", ".odp",
+                     ".pages", ".key", ".numbers", ".epub"}
+
+    try:
+        if ext == ".pdf":
+            text = _extract_pdf(path)
+        elif ext == ".docx":
+            text = _extract_docx(path)
+        elif ext in (".xlsx", ".xlsm"):
+            text = _extract_xlsx(path)
+        elif ext == ".pptx":
+            text = _extract_pptx(path)
+        elif ext in (".html", ".htm"):
+            text = _extract_html(path)
+        elif ext == ".xml":
+            text = _extract_xml(path)
+        elif ext == ".rtf":
+            text = _extract_rtf(path)
+        elif ext in _PLAIN_TEXT_EXTS:
+            text = _read_text_file(path)
+        elif ext in fallback_exts:
+            return _read_via_claude(path)
+        else:
+            # unknown / no extension: sniff raw bytes first; delegate if binary
+            if _looks_binary(path):
+                return _read_via_claude(path)
+            text = _read_text_file(path)
+    except Exception as e:
+        fb = _read_via_claude(path)
+        if fb.get("success"):
+            return fb
+        return _err(f"не удалось извлечь текст ({ext}): {e}")
+
+    text = text or ""
+    return _ok({"filename": path.name, "ext": ext, "chars": len(text),
+                "truncated": len(text) > max_chars, "text": text[:max_chars]})
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def dispatch(command: dict, apps: dict, obsidian_cfg: dict | None = None) -> dict:
@@ -330,6 +847,8 @@ def dispatch(command: dict, apps: dict, obsidian_cfg: dict | None = None) -> dic
 
     if cmd_type == "screenshot":
         return handle_screenshot(payload)
+    elif cmd_type == "computer":
+        return handle_computer(payload)
     elif cmd_type == "terminal":
         return handle_terminal(payload)
     elif cmd_type == "launch-app":
@@ -348,5 +867,11 @@ def dispatch(command: dict, apps: dict, obsidian_cfg: dict | None = None) -> dic
         return handle_obsidian_read(payload, obs_cfg)
     elif cmd_type == "obsidian-context":
         return handle_obsidian_context(payload, obs_cfg)
+    elif cmd_type == "send-file":
+        return handle_send_file(payload)
+    elif cmd_type == "run-claude-code":
+        return handle_run_claude_code(payload)
+    elif cmd_type == "read-document":
+        return handle_read_document(payload)
     else:
         return _err(f"unknown command type: {cmd_type}")
