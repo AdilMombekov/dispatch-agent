@@ -2,6 +2,7 @@
 import sys
 import threading
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from io import BytesIO
 
@@ -10,18 +11,17 @@ import pystray
 from pystray import MenuItem, Menu
 
 from agent.config import ensure_config
-from agent.poller import Poller
-
-_LOG_PATH = Path(__file__).resolve().parent / "agent.log"
-# When frozen by PyInstaller __file__ points to _MEI temp dir; write log next to exe instead
-if getattr(sys, "frozen", False):
-    _LOG_PATH = Path(sys.executable).parent / "agent.log"
+from agent.paths import LOG_PATH as _LOG_PATH
+from agent.singleton import acquire as _acquire_singleton
+from agent.telegram_bot import TelegramBot
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(_LOG_PATH, encoding="utf-8"),
+        # Rotate at 10 MB, keep 5 old files (agent.log, agent.log.1 … .5).
+        RotatingFileHandler(_LOG_PATH, maxBytes=10 * 1024 * 1024,
+                            backupCount=5, encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -35,7 +35,7 @@ _STATUS_COLORS = {
 }
 
 _icon: pystray.Icon | None = None
-_poller: Poller | None = None
+_bot: TelegramBot | None = None
 
 
 # ── Tray icon image ────────────────────────────────────────────────────────
@@ -51,32 +51,62 @@ def _make_icon(color: tuple) -> Image.Image:
 
 def _show_status(icon, item):
     cfg = ensure_config()
-    status = _poller.status if _poller else "stopped"
+    status = _bot.status if _bot else "stopped"
+    bot_token = cfg.get("telegram_bot_token", "")
     import tkinter.messagebox as mb
     import tkinter as tk
     root = tk.Tk()
     root.withdraw()
     mb.showinfo(
         "Dispatch Agent Status",
-        f"Status: {status}\nRailway URL: {cfg.get('railway_url') or '(not set)'}\nToken: {cfg.get('agent_token', '')[:8]}...",
+        f"Status: {status}\nTelegram bot: {'set' if bot_token else '(not set)'}\n"
+        f"AI accounts: {len(cfg.get('anthropic_api_keys') or [])}",
     )
     root.destroy()
 
 
 def _open_settings(icon, item):
-    from ui.settings_window import open_settings
-    threading.Thread(target=open_settings, daemon=True).start()
+    """Launch the Electron Control Center.
+
+    Resolution order:
+      1) packaged exe: dist/Agent-OS Control Center.exe (or similar) next to project
+      2) dev mode: `npm start` inside agent_os_app/
+      3) fallback: legacy customtkinter window (ui/settings_window.py)
+    """
+    import subprocess, os
+    base = Path(__file__).resolve().parent
+    app_dir = base / "agent_os_app"
+
+    # 1) packaged build
+    for cand in (app_dir / "dist" / "Agent-OS Control Center.exe",
+                 app_dir / "dist" / "win-unpacked" / "Agent-OS Control Center.exe"):
+        if cand.exists():
+            subprocess.Popen([str(cand)], cwd=str(cand.parent))
+            return
+
+    # 2) dev mode (npm start) — needs Node installed and `npm install` done
+    if (app_dir / "node_modules" / "electron").exists():
+        npm = "npm.cmd" if os.name == "nt" else "npm"
+        subprocess.Popen([npm, "start"], cwd=str(app_dir), shell=False,
+                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        return
+
+    # 3) legacy fallback
+    try:
+        from ui.settings_window import open_settings
+        threading.Thread(target=open_settings, daemon=True).start()
+    except Exception as e:
+        logger.error(f"No Settings UI available: {e}. Run `npm install` inside agent_os_app/.")
 
 
 def _open_log(icon, item):
     import subprocess
-    log_path = Path(__file__).parent / "agent.log"
-    subprocess.Popen(["notepad.exe", str(log_path)])
+    subprocess.Popen(["notepad.exe", str(_LOG_PATH)])
 
 
 def _exit_app(icon, item):
-    if _poller:
-        _poller.stop()
+    if _bot:
+        _bot.stop()
     icon.stop()
 
 
@@ -94,12 +124,20 @@ def _on_status_change(status: str):
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
-    global _icon, _poller
+    global _icon, _bot
+
+    # Single-instance guard: refuse to start if another agent already runs.
+    # Two agents on one Telegram token cause "Conflict: terminated by other
+    # getUpdates request". This is the authoritative fix; watchdog debounce
+    # (P0.2) just reduces how often the guard is exercised.
+    if not _acquire_singleton():
+        logger.error("another agent instance is already running — exiting")
+        sys.exit(1)
 
     ensure_config()
 
-    _poller = Poller(on_status_change=_on_status_change)
-    _poller.start()
+    _bot = TelegramBot(on_status_change=_on_status_change)
+    _bot.start()
 
     menu = Menu(
         MenuItem("Status", _show_status),
