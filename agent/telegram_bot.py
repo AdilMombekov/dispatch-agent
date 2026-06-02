@@ -64,6 +64,13 @@ MODEL_PRICING = {
     ANALYST_MODEL: (3.00 / 1_000_000, 15.00 / 1_000_000),
 }
 
+# System prompt for orchestrator qa-tasks (Haiku, no tools). Kept terse so
+# answers fit Telegram without walls of caveats.
+QA_SYSTEM_PROMPT = (
+    "Ты ассистент Dispatch. Отвечай кратко и по делу, на русском. "
+    "Без лишних оговорок и предисловий. Если не уверен — так и скажи."
+)
+
 # If the user has been silent in Telegram for this long, the next interaction
 # triggers a "refresh agent?" prompt so they don't keep talking to a stale
 # in-memory copy that missed source edits made while they were away.
@@ -279,6 +286,9 @@ class TelegramBot:
             is_enabled=lambda: bool(self._state.get("dispatch_enabled", False)),
             report=lambda chat_id, text: self._send_message(chat_id, text),
         )
+        # qa → Haiku (P3.10). code/click_gui/scheduled wired in later steps;
+        # until then the dispatcher stub-completes them.
+        self._dispatcher.register("qa", self._qa_executor)
 
     # ── State persistence (spend, active account) ───────────────────────────
 
@@ -745,6 +755,65 @@ class TelegramBot:
             self._send_message(chat_id, f"🚫 Задача #{task_id} отменена.")
         else:
             self._send_message(chat_id, f"Задача #{task_id} уже завершена ({t.status}), отменять нечего.")
+
+    # ── Orchestrator executors (P3.10+) ──────────────────────────────────────
+
+    def _active_anthropic_key(self) -> str | None:
+        """Return the API key for the active account, or None if unconfigured.
+        The dispatcher may run before _run() loads _cfg, so fall back to a fresh
+        config read."""
+        keys = self._cfg.get("anthropic_api_keys") or []
+        if not keys:
+            try:
+                keys = (load_config().get("anthropic_api_keys") or [])
+            except Exception:
+                keys = []
+        if not keys:
+            return None
+        idx = int(self._state.get("active_account", 1)) - 1
+        if not (0 <= idx < len(keys)):
+            idx = 0
+        return keys[idx]
+
+    def _qa_executor(self, task) -> str:
+        """Dispatcher executor for kind=qa: answer via Haiku (no tools).
+
+        Reuses the bot's _anthropic HTTP path + _add_cost meter so there is one
+        spend tracker, and also records a per-task run for /tasks accounting.
+        """
+        sp = self._state["spend"]
+        if sp.get("limit_usd", 0) > 0 and sp.get("total_usd", 0) >= sp["limit_usd"]:
+            raise RuntimeError(f"лимит трат ${sp['limit_usd']:.2f} достигнут")
+        api_key = self._active_anthropic_key()
+        if not api_key:
+            raise RuntimeError("нет anthropic_api_keys в config.json")
+        t0 = time.time()
+        resp = self._anthropic(
+            api_key,
+            [{"role": "user", "content": task.prompt}],
+            model=ROUTER_MODEL,
+            system=QA_SYSTEM_PROMPT,
+            tools=None,
+            max_tokens=1024,
+        )
+        usage = resp.get("usage", {}) or {}
+        parts = [
+            b.get("text", "") for b in (resp.get("content") or [])
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        answer = "\n".join(p for p in parts if p).strip() or "(пустой ответ)"
+        # Spend meter (shared with chat) + per-task run record.
+        self._add_cost(ROUTER_MODEL, usage)
+        self._save_state()
+        cin, cout = MODEL_PRICING[ROUTER_MODEL]
+        cost = usage.get("input_tokens", 0) * cin + usage.get("output_tokens", 0) * cout
+        self._queue.record_run(
+            task.id, ROUTER_MODEL,
+            tokens_in=usage.get("input_tokens", 0),
+            tokens_out=usage.get("output_tokens", 0),
+            cost_usd=cost, duration_s=time.time() - t0, ok=True,
+        )
+        return answer
 
     # All skill names the bot routes (top-level tools + queue_agent_command sub-types).
     # Used by /skills to render the toggle keyboard; must stay in sync with TOOLS.

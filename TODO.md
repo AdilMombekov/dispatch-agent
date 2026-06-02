@@ -216,7 +216,17 @@
 
 ---
 
-### [ ] 10. Шаг 2 — HaikuClient для kind=qa
+### [x] 10. Шаг 2 — HaikuClient для kind=qa
+> ✅ Сделано 2026-06-02:
+> - **Отклонение от плана (обосновано):** не плодил `clients.py:HaikuClient` на SDK. Вместо этого переиспользовал существующий `_anthropic()` (HTTP) + `_add_cost()` бота — один счётчик трат, а не два. qa-executor = метод бота `_qa_executor`, зарегистрирован в dispatcher через `register("qa", …)`.
+> - `_active_anthropic_key()` — берёт ключ из `anthropic_api_keys[active_account-1]` (с фоллбэком на свежий `load_config()`).
+> - Модель `ROUTER_MODEL` (claude-haiku-4-5), `QA_SYSTEM_PROMPT` (кратко, по-русски), `max_tokens=1024`, без tools.
+> - Soft-лимит: если `spend.total >= spend.limit` — задача падает с понятной ошибкой (полноценный budget в P3.13).
+> - Стоимость пишется и в meter (`_add_cost`), и в `runs` (`record_run`) для /tasks.
+> - **Реальный e2e тест пройден:** `/q «сколько 2+2»` → ответ «4», cost $0.000086, run-row (82 in/5 out, ok=1). Изолированно (temp db + no-op save_state, чтобы не трогать живой state).
+
+<details><summary>Исходный промпт</summary>
+
 **Промпт:** Простые вопросы через Anthropic API (модель Haiku) без tools.
 
 Файлы:
@@ -235,6 +245,8 @@
 
 Проверка:
 - `/q сколько будет 2+2` → через несколько секунд приходит ответ от Haiku, в БД есть запись в `runs` с tokens/cost.
+
+</details>
 
 ---
 
