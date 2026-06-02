@@ -4,10 +4,18 @@
 
 # Runtime config (contains token — use config.example.json for reference)
 config.json
+config.json.*
+
+# Runtime state (live data, machine-specific — never commit)
+agent_state.json
+chats.json
+backup_index.json
+claude_task.json
+claude_runs.jsonl
+inbox/
 
 # Logs
 *.log
-agent.log
 
 # Python
 __pycache__/
@@ -20,6 +28,16 @@ __pycache__/
 build/DispatchAgent/
 dist/
 *.spec
+# …but DO track our spec — it carries hiddenimports needed for a working build.
+!DispatchAgent.spec
+
+# Node (Electron Control Center)
+node_modules/
+
+# Junk / build artifacts
+_npm_start.*
+*.zip
+build_log.txt
 
 # Claude Code local settings
 .claude/
