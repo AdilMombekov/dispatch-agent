@@ -1,0 +1,5 @@
+# Google Drive backup deps — install with:
+#   pip install -r agent/requirements_backup.txt
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
+google-auth-httplib2>=0.2.0
