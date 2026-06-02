@@ -250,7 +250,17 @@
 
 ---
 
-### [ ] 11. Шаг 3 — ClaudeCliClient для kind=code
+### [x] 11. Шаг 3 — ClaudeCliClient для kind=code
+> ✅ Сделано 2026-06-02:
+> - **Отклонение от плана (обосновано):** не делал `clients.py:ClaudeCliClient`. Переиспользовал существующий `run_claude_code_stream()` из handlers.py (синхронно, on_event=None) + готовые хелперы бота `_active_config_dir()` и `_claude_dev_root()`. Executor = `_code_executor`, зарегистрирован через `register("code", …)`.
+> - payload: model=sonnet, cwd=dev root, config_dir=активный аккаунт, trusted=True, timeout=1800. Результат тримится до 3500 символов (лимит Telegram). Стоимость (subscription) пишется в `runs`.
+> - Команда `/c <prompt>` — явный запуск code-задачи минуя классификатор (`force_kind="code"`). Также router сам отправляет «закоммить/git/код…» в code.
+> - `claude` CLI подтверждён на PATH.
+> - **Проверено:** wiring (executors qa+code зарегистрированы), синтаксис. **Реальную code-задачу НЕ запускал автоматически** — claude -p trusted может изменить файлы. Тестировать юзеру через Telegram на безопасном промпте.
+> - ⚠️ **Без guard'а:** code-задачи выполняются trusted без ревью до P3.13 (SonnetReviewer). dispatch OFF по умолчанию — опт-ин.
+
+<details><summary>Исходный промпт</summary>
+
 **Промпт:** Тяжёлые задачи (правка кода, git) — через subprocess `claude -p <prompt>` (это claude CLI, headless mode). Использует активный профиль (см. `claude-switch.ps1`).
 
 Файлы:
@@ -265,6 +275,8 @@
 
 Проверка:
 - `/c покажи структуру agent/` → CLI запускается, ответ возвращается в Telegram.
+
+</details>
 
 ---
 

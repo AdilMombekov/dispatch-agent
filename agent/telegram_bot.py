@@ -286,9 +286,10 @@ class TelegramBot:
             is_enabled=lambda: bool(self._state.get("dispatch_enabled", False)),
             report=lambda chat_id, text: self._send_message(chat_id, text),
         )
-        # qa → Haiku (P3.10). code/click_gui/scheduled wired in later steps;
-        # until then the dispatcher stub-completes them.
+        # qa → Haiku (P3.10), code → claude CLI (P3.11). click_gui/scheduled
+        # wired in later steps; until then the dispatcher stub-completes them.
         self._dispatcher.register("qa", self._qa_executor)
+        self._dispatcher.register("code", self._code_executor)
 
     # ── State persistence (spend, active account) ───────────────────────────
 
@@ -655,6 +656,8 @@ class TelegramBot:
             self._cmd_dispatch_toggle(chat_id, parts[1].lower() if len(parts) > 1 else None)
         elif cmd == "/q":
             self._cmd_enqueue(chat_id, text[len(parts[0]):].strip())
+        elif cmd == "/c":
+            self._cmd_enqueue(chat_id, text[len(parts[0]):].strip(), force_kind="code")
         elif cmd == "/tasks":
             self._cmd_list_tasks(chat_id)
         elif cmd == "/cancel":
@@ -682,7 +685,7 @@ class TelegramBot:
             self._send_message(
                 chat_id,
                 f"❌ Неизвестная команда: `{cmd}`\n\n"
-                "Доступно: /start /q /tasks /cancel /dispatch /claude /history /skills "
+                "Доступно: /start /q /c /tasks /cancel /dispatch /claude /history /skills "
                 "/update /spend /setlimit /resetspend /rescan /help",
                 parse_mode="Markdown")
 
@@ -707,12 +710,13 @@ class TelegramBot:
                 f"В очереди: {queued}\n\n"
                 "Команды: /dispatch on · /dispatch off")
 
-    def _cmd_enqueue(self, chat_id, prompt: str):
-        """/q <prompt> — classify and queue a task for the orchestrator."""
+    def _cmd_enqueue(self, chat_id, prompt: str, force_kind: str | None = None):
+        """/q <prompt> — classify and queue a task. force_kind bypasses the
+        router (used by /c → code)."""
         if not prompt:
             self._send_message(chat_id, "Использование: /q <что сделать>\nНапример: /q сколько будет 2+2")
             return
-        kind = classify(prompt)
+        kind = force_kind or classify(prompt)
         task_id = self._queue.enqueue(chat_id, kind, prompt)
         enabled = bool(self._state.get("dispatch_enabled", False))
         tail = "" if enabled else "\n⏸ Dispatch выключен — включи /dispatch on, чтобы выполнить."
@@ -814,6 +818,38 @@ class TelegramBot:
             cost_usd=cost, duration_s=time.time() - t0, ok=True,
         )
         return answer
+
+    def _code_executor(self, task) -> str:
+        """Dispatcher executor for kind=code: run `claude -p` headless under the
+        active account, in the configured dev root. Flat-rate subscription, not
+        metered API.
+
+        NOTE: runs trusted (can modify files). The SonnetReviewer gate (P3.13)
+        is not wired yet — until then, code tasks execute unguarded. dispatch is
+        OFF by default and opt-in, so this only runs when the user enables it.
+        """
+        payload = {
+            "prompt": task.prompt,
+            "model": "sonnet",
+            "cwd": str(self._claude_dev_root()),
+            "config_dir": self._active_config_dir(),
+            "trusted": True,
+            "timeout": 1800,
+        }
+        t0 = time.time()
+        res = run_claude_code_stream(payload, on_event=None, on_proc=None)
+        dur = time.time() - t0
+        if not res.get("success"):
+            self._queue.record_run(task.id, "claude-cli", duration_s=dur, ok=False)
+            raise RuntimeError(res.get("error") or "claude CLI failed")
+        data = res.get("data") or {}
+        self._queue.record_run(
+            task.id, "claude-cli",
+            cost_usd=float(data.get("cost_usd") or 0.0), duration_s=dur, ok=True,
+        )
+        out = (data.get("result") or "").strip() or "(claude вернул пустой результат)"
+        # Telegram hard-caps messages near 4096 chars; trim long CLI output.
+        return out[:3500] + ("…" if len(out) > 3500 else "")
 
     # All skill names the bot routes (top-level tools + queue_agent_command sub-types).
     # Used by /skills to render the toggle keyboard; must stay in sync with TOOLS.
