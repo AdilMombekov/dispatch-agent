@@ -426,6 +426,20 @@
 ### [x] P2.9 Обновить config.example.json
 > ✅ Сделано 2026-06-03: переписан под реальную схему. Убраны n8n-ключи (railway_url, poll_interval, agent_token). Добавлены telegram_bot_token, owner_chat_id, anthropic_api_keys, daily_budget_usd, claude_accounts, claude_dev_root/folders, telegram_auto_clean, skill_disabled. Валидный JSON, без секретов.
 
+## 🛡 SAFETY (защита файлов)
+
+### [x] SAFETY.1 trash-guard — мягкое удаление
+> ✅ Сделано 2026-06-03:
+> - `agent/orchestrator/safety.py`: `safe_delete(path)` → переносит в `trash/<дата>/<ориг.путь>` + `manifest.jsonl` (restore/list). `restore(id)` возвращает на место (не затирает занятое). `detect_destructive(cmd)` ловит shell-удаление.
+> - **Терминал-guard** ([handlers.py](agent/handlers.py) `handle_terminal`): деструктивные команды (`rm -rf`, `del`, `Remove-Item`, `rmdir /s`, `format c:`…) **блокируются** с подсказкой `/rm`. Безопасные (`git format-patch`, `npm run build`) — проходят.
+> - Telegram: `/rm <путь>` (мягкое удаление), `/trash` (список), `/restore <id>`.
+> - `trash_dir` в config (можно указать backup-диск; default `DATA_DIR/trash`). `trash/` в .gitignore.
+> - **Тесты:** 6 деструктивных пойманы / 5 безопасных пропущены; safe_delete+restore roundtrip; терминал блокирует `del`, пускает `echo`.
+> - ⚠️ **Ограничение:** не перехватывает удаления ВНУТРИ внешних процессов (`claude -p` trusted, computer-use клики) — они гейтятся SonnetReviewer'ом и FAILSAFE отдельно. Полное покрытие — в v2 (см. AUDIT_PROMPT).
+
+## v2 (редизайн) — см. [docs/AUDIT_PROMPT.md](docs/AUDIT_PROMPT.md)
+Локальные агенты + VS Code/Docker + локальные модели (Qwen-Coder-7B под 8 ГБ VRAM) + Claude API как оркестратор + Obsidian для памяти аккаунтов. Сначала аудит, потом план.
+
 ## История изменений TODO.md
 
 - 2026-06-02: создан, перенесены задачи из чата с разбиением на P0/P1/P2/P3.

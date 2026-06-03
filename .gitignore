@@ -17,6 +17,7 @@ tasks.db-wal
 tasks.db-shm
 inbox/
 claude_accounts/
+trash/
 
 # Logs
 *.log

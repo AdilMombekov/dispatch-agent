@@ -150,6 +150,18 @@ def handle_terminal(payload: dict) -> dict:
     cmd = payload.get("cmd") or payload.get("command", "")
     if not cmd:
         return _err("no command provided")
+    # SAFETY.1: refuse hard-delete / wipe shell commands. Files must go through
+    # safe_delete (trash backup), not be destroyed via the terminal.
+    try:
+        from agent.orchestrator.safety import detect_destructive
+        hit = detect_destructive(cmd)
+    except Exception:
+        hit = None
+    if hit:
+        return _err(
+            f"⛔ Заблокировано: команда содержит деструктивное удаление ('{hit}'). "
+            "Удаление файлов только через мягкое удаление (/rm) — переносит в trash/ "
+            "с возможностью восстановления.")
     try:
         result = subprocess.run(
             cmd,

@@ -274,6 +274,9 @@ BOT_COMMANDS = [
     ("start",      "главное меню",                                  "Основные"),
     ("help",       "все команды (это сообщение)",                   "Основные"),
     ("clean",      "убрать неважные сообщения (Haiku решает)",      "Основные"),
+    ("rm",         "мягкое удаление в корзину: /rm <путь>",         "Файлы"),
+    ("trash",      "что в корзине (восстановимо)",                  "Файлы"),
+    ("restore",    "восстановить из корзины: /restore <id>",        "Файлы"),
     ("q",          "задача в очередь — Haiku сам определит тип",    "Оркестратор"),
     ("c",          "code-задача через claude CLI: /c <что сделать>", "Оркестратор"),
     ("click",      "GUI-задача (computer-use): /click <что сделать>", "Оркестратор"),
@@ -774,6 +777,12 @@ class TelegramBot:
             self._cmd_list_tasks(chat_id)
         elif cmd == "/clean":
             self._cmd_clean(chat_id)
+        elif cmd == "/rm":
+            self._cmd_safe_delete(chat_id, text[len(parts[0]):].strip())
+        elif cmd == "/trash":
+            self._cmd_list_trash(chat_id)
+        elif cmd == "/restore":
+            self._cmd_restore(chat_id, parts[1] if len(parts) > 1 else None)
         elif cmd == "/cancel":
             self._cmd_cancel_task(chat_id, parts[1] if len(parts) > 1 else None)
         elif cmd == "/every":
@@ -914,6 +923,55 @@ class TelegramBot:
         self._msg_log[str(chat_id)] = deque(
             (e for e in buf if e["id"] not in noise), maxlen=60)
         self._send_message(chat_id, f"🧹 Убрал {deleted} неважных сообщений.")
+
+    def _cmd_safe_delete(self, chat_id, path: str):
+        """/rm <path> — soft-delete: move to trash backup, restorable."""
+        if not path:
+            self._send_message(chat_id, "Использование: /rm <путь к файлу/папке>")
+            return
+        try:
+            from agent.orchestrator.safety import safe_delete
+            entry = safe_delete(path, reason=f"/rm chat={chat_id}")
+            self._send_message(
+                chat_id,
+                f"🗑→♻️ В корзину (#{entry['id']}): `{entry['original']}`\n"
+                f"Восстановить: /restore {entry['id']}", parse_mode="Markdown")
+        except FileNotFoundError:
+            self._send_message(chat_id, f"Не найдено: {path}")
+        except Exception as e:
+            self._send_message(chat_id, f"Ошибка удаления: {e}")
+
+    def _cmd_list_trash(self, chat_id):
+        """/trash — list recent soft-deleted items."""
+        from agent.orchestrator.safety import list_trash
+        import datetime as _dt
+        items = list_trash(15)
+        if not items:
+            self._send_message(chat_id, "♻️ Корзина пуста.")
+            return
+        lines = ["♻️ Корзина (новые сверху):"]
+        for e in items:
+            when = _dt.datetime.fromtimestamp(e.get("ts", 0)).strftime("%m-%d %H:%M")
+            orig = e.get("original", "")
+            if len(orig) > 50:
+                orig = "…" + orig[-49:]
+            lines.append(f"#{e.get('id')} · {when} · {orig}")
+        lines.append("\nВосстановить: /restore <id>")
+        self._send_message(chat_id, "\n".join(lines))
+
+    def _cmd_restore(self, chat_id, arg: str | None):
+        """/restore <id> — move a trashed item back to its original location."""
+        try:
+            tid = int(arg)
+        except (TypeError, ValueError):
+            self._send_message(chat_id, "Использование: /restore <id> (см. /trash)")
+            return
+        from agent.orchestrator.safety import restore
+        restored = restore(tid)
+        if restored:
+            self._send_message(chat_id, f"♻️ Восстановлено: {restored}")
+        else:
+            self._send_message(chat_id, f"Не смог восстановить #{tid} (нет в корзине или путь занят).")
 
     def _clean_classify(self, buf: list) -> set[int]:
         """Ask Haiku which message ids in the buffer are noise. Returns a set of

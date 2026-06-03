@@ -25,6 +25,7 @@
   "autostart": false,
   "telegram_auto_clean": true,
   "skill_disabled": [],
+  "trash_dir": "",
 
   "qdrant_url": "",
   "qdrant_api_key": "",
