@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import requests
@@ -253,6 +254,7 @@ APPS_MENU = {"inline_keyboard": [
 BOT_COMMANDS = [
     ("start",      "главное меню",                                  "Основные"),
     ("help",       "все команды (это сообщение)",                   "Основные"),
+    ("clean",      "убрать неважные сообщения (Haiku решает)",      "Основные"),
     ("q",          "задача в очередь — Haiku сам определит тип",    "Оркестратор"),
     ("c",          "code-задача через claude CLI: /c <что сделать>", "Оркестратор"),
     ("tasks",      "список задач и статусы",                        "Оркестратор"),
@@ -294,6 +296,9 @@ class TelegramBot:
         # during an AI turn; at the end we keep the user-facing answer and delete the rest.
         # Roles: 'text' (model text), 'result' (tool output), 'status', 'error'.
         self._turn_track: dict[str, list[tuple[int, str]]] = {}
+        # Rolling log of recent message ids (bot + user) per chat, for /clean.
+        # In a private chat a bot may delete both its own and incoming messages.
+        self._msg_log: dict[str, deque] = {}
         # Tracks the active `claude -p` subprocess per chat so the user can hit
         # ❌ Отменить on the streamed message and kill it without waiting for
         # the watchdog (30-minute default).
@@ -488,13 +493,25 @@ class TelegramBot:
             logger.warning(f"tg {method} -> {data.get('description')}")
         return data
 
+    def _log_msg(self, chat_id, msg_id, role: str, text: str) -> None:
+        """Append a message to the per-chat rolling buffer used by /clean."""
+        if not msg_id:
+            return
+        buf = self._msg_log.setdefault(str(chat_id), deque(maxlen=60))
+        buf.append({"id": int(msg_id), "role": role, "text": (text or "")[:160]})
+
     def _send_message(self, chat_id, text, reply_markup=None, parse_mode=None):
         p = {"chat_id": chat_id, "text": text}
         if reply_markup:
             p["reply_markup"] = reply_markup
         if parse_mode:
             p["parse_mode"] = parse_mode
-        return self._tg("sendMessage", p)
+        resp = self._tg("sendMessage", p)
+        try:
+            self._log_msg(chat_id, (resp.get("result") or {}).get("message_id"), "bot", text)
+        except Exception:
+            pass
+        return resp
 
     def _send_photo(self, chat_id, jpeg_bytes, caption=None):
         data = {"chat_id": str(chat_id)}
@@ -628,6 +645,8 @@ class TelegramBot:
             self._handle_callback(upd["callback_query"])
         elif "message" in upd:
             msg = upd["message"]
+            # Log the incoming user message for /clean (id + text preview).
+            self._log_msg(chat_id, msg.get("message_id"), "user", msg.get("text", ""))
             if "voice" in msg:
                 self._send_message(msg["chat"]["id"],
                                    "🎤 Голос пока не поддерживается — напиши текстом или /start.")
@@ -697,6 +716,8 @@ class TelegramBot:
             self._cmd_enqueue(chat_id, text[len(parts[0]):].strip(), force_kind="code")
         elif cmd == "/tasks":
             self._cmd_list_tasks(chat_id)
+        elif cmd == "/clean":
+            self._cmd_clean(chat_id)
         elif cmd == "/cancel":
             self._cmd_cancel_task(chat_id, parts[1] if len(parts) > 1 else None)
         elif cmd == "/claude":
@@ -798,6 +819,72 @@ class TelegramBot:
             self._send_message(chat_id, f"🚫 Задача #{task_id} отменена.")
         else:
             self._send_message(chat_id, f"Задача #{task_id} уже завершена ({t.status}), отменять нечего.")
+
+    def _cmd_clean(self, chat_id):
+        """/clean — Haiku picks unimportant messages from the rolling buffer and
+        we delete them (menus, status pings, acks, stale errors). Substantive
+        Q&A and results are kept."""
+        buf = list(self._msg_log.get(str(chat_id), []))
+        if len(buf) < 2:
+            self._send_message(chat_id, "Чистить нечего — буфер пуст.")
+            return
+        try:
+            noise = self._clean_classify(buf)
+        except Exception as e:
+            logger.warning("clean classify failed: %s", e)
+            self._send_message(chat_id, f"Не смог понять что чистить: {e}")
+            return
+        if not noise:
+            self._send_message(chat_id, "🧹 Haiku не нашёл явного шума — ничего не удалил.")
+            return
+        deleted = 0
+        for entry in buf:
+            if entry["id"] in noise:
+                self._delete_message(chat_id, entry["id"])
+                deleted += 1
+        # Drop deleted ids from the buffer so a second /clean doesn't retry them.
+        self._msg_log[str(chat_id)] = deque(
+            (e for e in buf if e["id"] not in noise), maxlen=60)
+        self._send_message(chat_id, f"🧹 Убрал {deleted} неважных сообщений.")
+
+    def _clean_classify(self, buf: list) -> set[int]:
+        """Ask Haiku which message ids in the buffer are noise. Returns a set of
+        ids; empty set on unparseable output (fail-safe: delete nothing)."""
+        api_key = self._active_anthropic_key()
+        if not api_key:
+            raise RuntimeError("нет anthropic_api_keys")
+        listing = "\n".join(f'{e["id"]} [{e["role"]}] {e["text"]}' for e in buf)
+        system = (
+            "Ты чистишь личный Telegram-чат от шума. Дан список недавних сообщений "
+            "в формате '<id> [кто] текст'. Верни СТРОГО JSON-массив id (числа), "
+            "которые НЕважны и их можно удалить: меню и кнопки, статусы "
+            "(🔄/⏳/✅ без содержания), приветствия, подтверждения, устаревшие "
+            "ошибки, служебные команды вроде /start. НЕ удаляй содержательные "
+            "вопросы пользователя и полезные ответы/результаты. "
+            "Ответ — только JSON-массив чисел, без пояснений.")
+        resp = self._anthropic(
+            api_key, [{"role": "user", "content": listing}],
+            model=ROUTER_MODEL, system=system, tools=None, max_tokens=500)
+        usage = resp.get("usage", {}) or {}
+        self._add_cost(ROUTER_MODEL, usage)
+        self._save_state()
+        raw = "\n".join(
+            b.get("text", "") for b in (resp.get("content") or [])
+            if isinstance(b, dict) and b.get("type") == "text")
+        lo, hi = raw.find("["), raw.rfind("]")
+        if lo < 0 or hi <= lo:
+            return set()
+        try:
+            ids = json.loads(raw[lo:hi + 1])
+        except json.JSONDecodeError:
+            return set()
+        out: set[int] = set()
+        for x in ids:
+            try:
+                out.add(int(x))
+            except (TypeError, ValueError):
+                pass
+        return out
 
     # ── Orchestrator executors (P3.10+) ──────────────────────────────────────
 
