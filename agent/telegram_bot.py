@@ -10,6 +10,7 @@ import html
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -287,6 +288,7 @@ BOT_COMMANDS = [
     ("claude",     "Claude Code в папке проекта (стрим)",           "Claude Code"),
     ("history",    "последние 10 запусков Claude Code",             "Claude Code"),
     ("skills",     "включить/выключить инструменты AI",             "Claude Code"),
+    ("login",      "войти в активный аккаунт Claude (окно входа)",  "Аккаунт"),
     ("spend",      "траты по Anthropic API + лимит",                "Деньги"),
     ("setlimit",   "лимит трат: /setlimit 10.0",                    "Деньги"),
     ("resetspend", "обнулить счётчик трат",                         "Деньги"),
@@ -784,6 +786,8 @@ class TelegramBot:
             self._cmd_list_crons(chat_id)
         elif cmd == "/uncron":
             self._cmd_uncron(chat_id, parts[1] if len(parts) > 1 else None)
+        elif cmd == "/login":
+            self._launch_claude_login(chat_id, int(self._state.get("active_account", 1)))
         elif cmd == "/claude":
             self._claude_show_folders(chat_id)
         elif cmd == "/update":
@@ -1256,6 +1260,48 @@ class TelegramBot:
             return accounts[idx].get("email") or f"#{idx + 1}"
         return "(не настроен)"
 
+    def _launch_claude_login(self, chat_id, n: int):
+        """UX.3 (safe variant): switch to account #n and open Claude Code's OWN
+        login in a visible console (CLAUDE_CONFIG_DIR set). Claude opens the
+        proper OAuth browser itself — we never type Google credentials, so there
+        is no bot-detection/lockout risk. The user finishes auth in the window."""
+        self._cfg = load_config()
+        accounts = self._cfg.get("claude_accounts") or []
+        if not (0 < n <= len(accounts)):
+            self._send_message(chat_id, "Аккаунт не найден.")
+            return
+        acct = accounts[n - 1]
+        email = acct.get("email") or f"#{n}"
+        cfg_dir = (acct.get("config_dir") or "").strip()
+        claude = shutil.which("claude")
+        if not claude:
+            self._send_message(chat_id, "❌ claude CLI не найден на PATH.")
+            return
+        env = dict(os.environ)
+        env.pop("ANTHROPIC_API_KEY", None)  # force interactive/subscription login
+        if cfg_dir:
+            env["CLAUDE_CONFIG_DIR"] = cfg_dir
+            try:
+                Path(cfg_dir).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        CREATE_NEW_CONSOLE = 0x00000010
+        try:
+            subprocess.Popen([claude], env=env, cwd=str(BASE_DIR),
+                             creationflags=CREATE_NEW_CONSOLE)
+        except Exception as e:
+            self._send_message(chat_id, f"❌ Не смог открыть окно входа: {e}")
+            return
+        self._state["active_account"] = n
+        self._save_state()
+        self._send_message(
+            chat_id,
+            f"🔓 Открыл окно входа для *{email}*.\n\n"
+            "Заверши вход через браузер (Google/Anthropic) — Claude Code сам "
+            "откроет нужную страницу. После входа можно закрыть окно: аккаунт "
+            "активен для задач кода (`/c`, claude -p).",
+            parse_mode="Markdown")
+
     def _cowork_menu(self):
         """Коворк = рабочее пространство оркестратора (async-задачи)."""
         on = bool(self._state.get("dispatch_enabled", False))
@@ -1370,15 +1416,23 @@ class TelegramBot:
                     "🔑 Аккаунты Claude Code не настроены. Добавь их в config.json "
                     "(поле \"claude_accounts\").")
             else:
-                rows = [[{"text": f"{a.get('email', f'аккаунт {i}')}"
-                                  f"{' ✓' if active == i else ''}",
-                          "callback_data": f"account:{i}"}]
-                        for i, a in enumerate(accounts, start=1)]
+                rows = []
+                for i, a in enumerate(accounts, start=1):
+                    mark = " ✓" if active == i else ""
+                    rows.append([
+                        {"text": f"{a.get('email', f'#{i}')}{mark}",
+                         "callback_data": f"account:{i}"},
+                        {"text": "🔓 Войти", "callback_data": f"acctlogin:{i}"},
+                    ])
+                rows.append([{"text": "⬅️ Назад", "callback_data": "nav:settings"}])
                 self._send_message(
                     chat_id,
                     f"🔑 Аккаунт Claude Code (активен #{active}).\n"
-                    "Тяжёлые задачи (claude -p) пойдут под выбранным аккаунтом.",
+                    "Тап по почте — сделать активным. «🔓 Войти» — открыть окно входа "
+                    "(браузер) для этого аккаунта.",
                     reply_markup={"inline_keyboard": rows})
+        elif data.startswith("acctlogin:"):
+            self._launch_claude_login(chat_id, int(data[len("acctlogin:"):]))
         elif data.startswith("account:"):
             n = int(data[8:])
             accounts = self._cfg.get("claude_accounts") or []
