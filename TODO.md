@@ -38,7 +38,12 @@
 
 ## 🔴 P0 — критично, делать прямо сейчас
 
-### [ ] 1. Перезапустить агент И watchdog чтобы подхватить новый код
+### [x] 1. Перезапустить агент И watchdog чтобы подхватить новый код
+> ✅ Сделано 2026-06-03 (боевой режим, по команде юзера): убиты старые (агент 19392, watchdog 47468), запущены новые `pythonw main.py` (агент 8992) + `pythonw watchdog.py` (33452). Лог чистый: dispatcher+scheduler стартовали, **23 команды зарегистрированы**, polling пошёл, петли рестартов НЕТ. Проверено вживую: single-instance (вторая копия вышла с «another agent instance is already running»), watchdog с debounce=2/cooldown=300, tasks.db создана, ошибок нет.
+> ⏳ Автозагрузка на ребут — см. P1.5c (frozen-ключ в HKCU стоит убрать; сейчас watchdog поднимет dev-агента, mutex не даст конфликта).
+
+<details><summary>Исходный промпт</summary>
+
 **Промпт:** Это делает пользователь руками (я не могу убить чужие процессы). На 2026-06-02 живы: агент PID 47536 (`pythonw main.py`) и watchdog PID 47468 (зависший). Оба со старым кодом.
 1. Убить оба: `taskkill /F /PID 47536` и `taskkill /F /PID 47468` (PID-ы свежие — перепроверь актуальные: `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | ? { $_.CommandLine -like '*dispatch*' } | select ProcessId,CommandLine`).
 2. Запустить агент заново: `pythonw E:\dispatch\main.py` (или через иконку в трее).
@@ -47,6 +52,8 @@
 5. Проверить `watchdog.log`: новая строка `watchdog starting · … · debounce=2 · cooldown=300s` (значит подхватился мой код P0.2).
 6. Тест: в Telegram нажать любую кнопку — срабатывает без рестарта.
 7. Тест single-instance: попробовать запустить `pythonw E:\dispatch\main.py` второй раз — в `agent.log` должно быть `another agent instance is already running — exiting`, второй процесс сразу умирает.
+
+</details>
 
 ---
 
