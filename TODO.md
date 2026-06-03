@@ -280,7 +280,17 @@
 
 ---
 
-### [ ] 12. Шаг 4 — computer-use для kind=click_gui
+### [x] 12. Шаг 4 — computer-use для kind=click_gui
+> ✅ Сделано 2026-06-03 (код полностью; живой клик-тест за юзером — перехват мыши):
+> - `agent/orchestrator/desktop.py` — `Desktop` (pyautogui). **Масштабирование координат**: модель видит 1280×720, реальный экран 2560×1440 (scale 2.0), координаты модели множатся на scale. screenshot через pyautogui+PIL (downscale). FAILSAFE вкл (угол экрана = abort). Действия: move/click/right/middle/double/drag/type/key/scroll/wait. Маппинг xdotool-клавиш → pyautogui.
+> - `agent/orchestrator/computer.py` — `ComputerUseClient` цикл с tool `computer_20250124` (beta-хедер `computer-use-2025-01-24`), Haiku. Лимит шагов 25, max_tokens 1024/шаг. Аккумуляция usage. Возвращает summary/steps/usage/aborted/denied.
+> - **Safety:** pre-flight Sonnet-ревью на деструктивных целях (is_destructive(prompt)); emergency-stop через `state["dispatch_emergency_stop"]` (команда `/stop`, проверка между шагами); FAILSAFE; hard-cap шагов. (Per-action ревью — отложено; pre-flight + stop + failsafe = базовая сетка.)
+> - Wiring: `_click_executor` зарегистрирован на `click_gui`; `/click <prompt>`; прогресс шлётся в Telegram (`🖱 …`). Ленивый импорт pyautogui (не грузить на старте).
+> - **Тесты (моки, без реального экрана):** end_turn-only, tool_use→экшен исполнен+usage суммируется, pre-flight deny, abort-флаг. Конструкция Desktop + scale на реальном экране.
+> - ⚠️ **Тестировать вживую юзеру:** `/click открой блокнот и напиши привет` — когда за экраном.
+
+<details><summary>Исходный промпт / заметки</summary>
+
 > 🔧 **Готово к подключению (P3.13 уже сделан ДО этого шага):**
 > - `self._reviewer` (SonnetReviewer) + `is_destructive()` — вызывать перед каждым потенциально опасным tool-action в цикле (клик по «Удалить», ввод в терминал, закрытие приложений). deny → пропустить шаг.
 > - `self._budget` + dispatcher уже гейтит по дневному лимиту до старта задачи. Доп. computer-use токены пишутся через `record_run`.
@@ -306,6 +316,8 @@
 
 Проверка:
 - `/click открой Chrome и зайди на example.com` → Haiku открывает, в Telegram отчёт «✅ Открыл, на нужной странице».
+
+</details>
 
 ---
 

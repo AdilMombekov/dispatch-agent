@@ -275,6 +275,8 @@ BOT_COMMANDS = [
     ("clean",      "убрать неважные сообщения (Haiku решает)",      "Основные"),
     ("q",          "задача в очередь — Haiku сам определит тип",    "Оркестратор"),
     ("c",          "code-задача через claude CLI: /c <что сделать>", "Оркестратор"),
+    ("click",      "GUI-задача (computer-use): /click <что сделать>", "Оркестратор"),
+    ("stop",       "⛔ прервать текущую GUI-задачу",                 "Оркестратор"),
     ("tasks",      "список задач и статусы",                        "Оркестратор"),
     ("cancel",     "отменить задачу: /cancel <id>",                 "Оркестратор"),
     ("dispatch",   "оркестратор вкл/выкл: /dispatch on|off",        "Оркестратор"),
@@ -350,6 +352,7 @@ class TelegramBot:
         # wired in later steps; until then the dispatcher stub-completes them.
         self._dispatcher.register("qa", self._qa_executor)
         self._dispatcher.register("code", self._code_executor)
+        self._dispatcher.register("click_gui", self._click_executor)
         # Recurring tasks (P3.14): own lightweight scheduler, no extra dependency.
         self._scheduler = Scheduler(self._queue, classify=classify)
 
@@ -759,6 +762,12 @@ class TelegramBot:
             self._cmd_enqueue(chat_id, text[len(parts[0]):].strip())
         elif cmd == "/c":
             self._cmd_enqueue(chat_id, text[len(parts[0]):].strip(), force_kind="code")
+        elif cmd == "/click":
+            self._cmd_enqueue(chat_id, text[len(parts[0]):].strip(), force_kind="click_gui")
+        elif cmd == "/stop":
+            self._state["dispatch_emergency_stop"] = True
+            self._save_state()
+            self._send_message(chat_id, "⛔ Стоп-флаг поставлен — текущая GUI-задача прервётся между шагами.")
         elif cmd == "/tasks":
             self._cmd_list_tasks(chat_id)
         elif cmd == "/clean":
@@ -1088,6 +1097,40 @@ class TelegramBot:
         out = (data.get("result") or "").strip() or "(claude вернул пустой результат)"
         # Telegram hard-caps messages near 4096 chars; trim long CLI output.
         return out[:3500] + ("…" if len(out) > 3500 else "")
+
+    def _click_executor(self, task) -> str:
+        """Dispatcher executor for kind=click_gui: Haiku drives the desktop via
+        computer-use. Pre-flight review on destructive goals; /stop aborts."""
+        api_key = self._active_anthropic_key()
+        if not api_key:
+            raise RuntimeError("нет anthropic_api_keys")
+        # Lazy import: pyautogui pulls a GUI backend — only load when we click.
+        from agent.orchestrator.desktop import Desktop
+        from agent.orchestrator.computer import ComputerUseClient
+        # Clear any stale emergency-stop flag before starting.
+        self._state["dispatch_emergency_stop"] = False
+        self._save_state()
+        desktop = Desktop()
+        client = ComputerUseClient(
+            api_key, ROUTER_MODEL, desktop,
+            reviewer=self._reviewer, is_destructive=is_destructive,
+            should_abort=lambda: bool(self._state.get("dispatch_emergency_stop")),
+            on_step=lambda t: self._send_message(task.chat_id, f"🖱 {t[:200]}"),
+            max_steps=25)
+        t0 = time.time()
+        res = client.run(task.prompt)
+        usage = res.get("usage", {}) or {}
+        self._add_cost(ROUTER_MODEL, usage)
+        self._save_state()
+        cin, cout = MODEL_PRICING[ROUTER_MODEL]
+        cost = usage.get("input_tokens", 0) * cin + usage.get("output_tokens", 0) * cout
+        self._queue.record_run(
+            task.id, "haiku-cu",
+            tokens_in=usage.get("input_tokens", 0),
+            tokens_out=usage.get("output_tokens", 0),
+            cost_usd=cost, duration_s=time.time() - t0,
+            ok=not res.get("denied"))
+        return res.get("summary", "(пусто)")
 
     def _review_ask(self, system: str, user: str) -> str:
         """Sonnet call for the SonnetReviewer. Reuses _anthropic + spend meter."""
