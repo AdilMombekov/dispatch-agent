@@ -227,18 +227,35 @@ TOOLS = [{
     },
 }]
 
+# Top-level menu: 4 sections. Navigation is ephemeral (edit-in-place) so the
+# chat doesn't fill with stale menus — see _edit_menu / nav:* callbacks.
 MAIN_MENU = {"inline_keyboard": [
+    [{"text": "💬 Чат", "callback_data": "nav:chat"},
+     {"text": "🤝 Коворк", "callback_data": "nav:cowork"}],
+    [{"text": "💻 Код", "callback_data": "nav:code"},
+     {"text": "⚙️ Настройки", "callback_data": "nav:settings"}],
+]}
+
+MAIN_MENU_TEXT = "🤖 *Dispatch Agent* — выбери раздел:"
+
+# Code / PC-control section — reuses existing action callbacks.
+CODE_MENU = {"inline_keyboard": [
     [{"text": "🤖 Запустить Claude Code", "callback_data": "claude:start"}],
-    [{"text": "📸 Снимок экрана", "callback_data": "cmd:screenshot"},
+    [{"text": "⌨️ Терминал", "callback_data": "menu:terminal"}],
+    [{"text": "🚀 Приложения", "callback_data": "menu:apps"},
+     {"text": "📦 Установить ПО", "callback_data": "menu:install"}],
+    [{"text": "📸 Скриншот", "callback_data": "cmd:screenshot"},
      {"text": "💻 О системе", "callback_data": "cmd:system-info"}],
     [{"text": "🌐 Профили Chrome", "callback_data": "menu:chrome"}],
-    [{"text": "🚀 Запустить приложение", "callback_data": "menu:apps"}],
-    [{"text": "⌨️ Терминал", "callback_data": "menu:terminal"}],
-    [{"text": "📦 Установить ПО", "callback_data": "menu:install"}],
-    [{"text": "🔄 Обновить агента", "callback_data": "agent:update"}],
-    [{"text": "🔄 Обновить приложения", "callback_data": "sys:rescan"}],
-    [{"text": "🔑 Аккаунт Claude", "callback_data": "menu:accounts"}],
+    [{"text": "⬅️ Назад", "callback_data": "nav:main"}],
 ]}
+
+CHAT_TEXT = (
+    "💬 *Чат*\n\nПросто пиши задачу текстом — Haiku-роутер сам поймёт: ответ, "
+    "терминал, скриншот, чтение файла, клики мышью. Тяжёлое уходит в `claude -p`. "
+    "Картинки распознаются через vision."
+)
+CHAT_MENU = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "nav:main"}]]}
 
 APPS_MENU = {"inline_keyboard": [
     [{"text": "Cursor", "callback_data": "app:cursor"},
@@ -512,6 +529,22 @@ class TelegramBot:
         except Exception:
             pass
         return resp
+
+    def _edit_menu(self, chat_id, message_id, text, reply_markup=None,
+                   parse_mode="Markdown"):
+        """Edit a menu message in place (ephemeral navigation: one message that
+        morphs instead of a pile of stale menus). Falls back to sending a new
+        message if the edit fails (e.g. message too old / identical)."""
+        p = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        if reply_markup:
+            p["reply_markup"] = reply_markup
+        if parse_mode:
+            p["parse_mode"] = parse_mode
+        r = self._tg("editMessageText", p)
+        if isinstance(r, dict) and r.get("ok"):
+            return r
+        # Fallback: couldn't edit — send fresh so the user still gets the menu.
+        return self._send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
 
     def _send_photo(self, chat_id, jpeg_bytes, caption=None):
         data = {"chat_id": str(chat_id)}
@@ -1101,6 +1134,46 @@ class TelegramBot:
         lines.append(f"\n🔖 _v {ver}_")
         self._send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 
+    # ── Menu builders (dynamic sections) ─────────────────────────────────────
+
+    def _active_account_label(self) -> str:
+        accounts = self._cfg.get("claude_accounts") or []
+        idx = int(self._state.get("active_account", 1)) - 1
+        if 0 <= idx < len(accounts):
+            return accounts[idx].get("email") or f"#{idx + 1}"
+        return "(не настроен)"
+
+    def _cowork_menu(self):
+        """Коворк = рабочее пространство оркестратора (async-задачи)."""
+        on = bool(self._state.get("dispatch_enabled", False))
+        queued = len(self._queue.list(status="queued", limit=100))
+        spent, limit = self._budget.today_spent(), self._budget.limit()
+        text = (
+            "🤝 *Коворк* — рабочее пространство\n\n"
+            f"Dispatch: {'🟢 ВКЛ' if on else '⏸ ВЫКЛ'}\n"
+            f"В очереди: {queued}\n"
+            f"Бюджет сегодня: ${spent:.4f} / ${limit:.2f}\n\n"
+            "Ставь задачи: `/q <текст>` или `/c <код-задача>`")
+        kb = {"inline_keyboard": [
+            [{"text": ("⏸ Выключить Dispatch" if on else "🟢 Включить Dispatch"),
+              "callback_data": "dispatch:toggle"}],
+            [{"text": "📋 Мои задачи", "callback_data": "tasks:show"}],
+            [{"text": "⬅️ Назад", "callback_data": "nav:main"}],
+        ]}
+        return text, kb
+
+    def _settings_menu(self):
+        text = f"⚙️ *Настройки*\n\nАккаунт Claude: *{self._active_account_label()}*"
+        kb = {"inline_keyboard": [
+            [{"text": "🔑 Аккаунт / переключить", "callback_data": "menu:accounts"}],
+            [{"text": "🧰 Скилы", "callback_data": "settings:skills"},
+             {"text": "💰 Траты", "callback_data": "settings:spend"}],
+            [{"text": "🔄 Обновить агента", "callback_data": "agent:update"},
+             {"text": "🔧 Пересканировать", "callback_data": "sys:rescan"}],
+            [{"text": "⬅️ Назад", "callback_data": "nav:main"}],
+        ]}
+        return text, kb
+
     # ── Callback (button) handling ──────────────────────────────────────────────
 
     def _handle_callback(self, cb: dict):
@@ -1112,6 +1185,36 @@ class TelegramBot:
             # agent:update) would self-restart, drop the offset, fetch the same
             # stale callback again — infinite loop. Drop it.
             logger.info(f"callback expired, skipping action: {data!r}")
+            return
+
+        # Ephemeral menu navigation: edit the SAME message in place so the chat
+        # doesn't accumulate stale menus.
+        if data.startswith("nav:") or data in ("dispatch:toggle", "tasks:show",
+                                               "settings:skills", "settings:spend"):
+            mid = cb["message"]["message_id"]
+            if data == "nav:main":
+                self._edit_menu(chat_id, mid, MAIN_MENU_TEXT, MAIN_MENU)
+            elif data == "nav:chat":
+                self._edit_menu(chat_id, mid, CHAT_TEXT, CHAT_MENU)
+            elif data == "nav:code":
+                self._edit_menu(chat_id, mid, "💻 *Код*", CODE_MENU)
+            elif data == "nav:cowork":
+                text, kb = self._cowork_menu()
+                self._edit_menu(chat_id, mid, text, kb)
+            elif data == "nav:settings":
+                text, kb = self._settings_menu()
+                self._edit_menu(chat_id, mid, text, kb)
+            elif data == "dispatch:toggle":
+                self._state["dispatch_enabled"] = not bool(self._state.get("dispatch_enabled", False))
+                self._save_state()
+                text, kb = self._cowork_menu()
+                self._edit_menu(chat_id, mid, text, kb)
+            elif data == "tasks:show":
+                self._cmd_list_tasks(chat_id)
+            elif data == "settings:skills":
+                self._show_skills_toggle(chat_id)
+            elif data == "settings:spend":
+                self._handle_command({"chat": {"id": chat_id}, "text": "/spend"})
             return
 
         if data.startswith("cmd:"):
