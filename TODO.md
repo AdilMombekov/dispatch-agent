@@ -387,6 +387,9 @@
 - ⚠️ Требует computer-use (P3.12) + Chrome automation. Хрупко: 2FA, капча, детект ботов. Заложить ручное вмешательство (пауза «подтверди вход руками» + продолжение).
 - ⚠️ Я предупредил: `claude-switch.ps1` уже даёт мгновенный swap без повторного логина — но юзер хочет именно автоматизацию веб-входа. Если автоматизация окажется слишком хрупкой — откатиться на swap.
 
+### [x] P2.9 Обновить config.example.json
+> ✅ Сделано 2026-06-03: переписан под реальную схему. Убраны n8n-ключи (railway_url, poll_interval, agent_token). Добавлены telegram_bot_token, owner_chat_id, anthropic_api_keys, daily_budget_usd, claude_accounts, claude_dev_root/folders, telegram_auto_clean, skill_disabled. Валидный JSON, без секретов.
+
 ## История изменений TODO.md
 
 - 2026-06-02: создан, перенесены задачи из чата с разбиением на P0/P1/P2/P3.

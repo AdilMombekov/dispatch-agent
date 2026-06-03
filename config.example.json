@@ -1,8 +1,18 @@
 {
-  "railway_url": "https://your-project.up.railway.app",
-  "agent_token": "YOUR_AGENT_TOKEN_FROM_RAILWAY_VARS",
-  "poll_interval_active": 2,
-  "poll_interval_idle": 10,
+  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN_FROM_@BotFather",
+  "owner_chat_id": 0,
+
+  "anthropic_api_keys": ["sk-ant-..."],
+  "openai_api_key": "",
+  "api_limit_usd": 5.0,
+  "daily_budget_usd": 7.0,
+
+  "claude_accounts": [
+    { "email": "you@example.com", "config_dir": "" }
+  ],
+  "claude_dev_root": "E:/",
+  "claude_dev_folders": [],
+
   "apps": {
     "cursor": "",
     "vscode": "",
@@ -11,13 +21,15 @@
     "terminal": "",
     "chrome": ""
   },
+
   "autostart": false,
-  "api_limit_usd": 5.0,
-  "daily_budget_usd": 7.0,
-  "openai_api_key": "",
+  "telegram_auto_clean": true,
+  "skill_disabled": [],
+
   "qdrant_url": "",
   "qdrant_api_key": "",
   "qdrant_collection": "dispatch_memory",
+
   "obsidian": {
     "host": "https://localhost:27124",
     "token": "YOUR_OBSIDIAN_LOCAL_REST_TOKEN",
