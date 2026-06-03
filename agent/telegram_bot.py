@@ -247,6 +247,27 @@ APPS_MENU = {"inline_keyboard": [
     [{"text": "Terminal", "callback_data": "app:terminal"}],
 ]}
 
+# Single source of truth for slash commands. Feeds BOTH Telegram's quick-command
+# menu (setMyCommands) and /help, so they can never drift apart.
+# (command_without_slash, description, help_group)
+BOT_COMMANDS = [
+    ("start",      "главное меню",                                  "Основные"),
+    ("help",       "все команды (это сообщение)",                   "Основные"),
+    ("q",          "задача в очередь — Haiku сам определит тип",    "Оркестратор"),
+    ("c",          "code-задача через claude CLI: /c <что сделать>", "Оркестратор"),
+    ("tasks",      "список задач и статусы",                        "Оркестратор"),
+    ("cancel",     "отменить задачу: /cancel <id>",                 "Оркестратор"),
+    ("dispatch",   "оркестратор вкл/выкл: /dispatch on|off",        "Оркестратор"),
+    ("claude",     "Claude Code в папке проекта (стрим)",           "Claude Code"),
+    ("history",    "последние 10 запусков Claude Code",             "Claude Code"),
+    ("skills",     "включить/выключить инструменты AI",             "Claude Code"),
+    ("spend",      "траты по Anthropic API + лимит",                "Деньги"),
+    ("setlimit",   "лимит трат: /setlimit 10.0",                    "Деньги"),
+    ("resetspend", "обнулить счётчик трат",                         "Деньги"),
+    ("rescan",     "найти новые установленные приложения",          "Сервис"),
+    ("update",     "перезапустить агента (свежий код)",             "Сервис"),
+]
+
 
 class TelegramBot:
     def __init__(self, on_status_change=None):
@@ -410,6 +431,10 @@ class TelegramBot:
             self._tg("deleteWebhook", {"drop_pending_updates": False})
         except Exception as e:
             logger.warning(f"deleteWebhook failed: {e}")
+
+        # Register the quick-command menu (the "/" list in Telegram) so the user
+        # doesn't have to remember/type commands.
+        self._set_bot_commands()
 
         self._set_status("idle")
         logger.info("Telegram bot polling started")
@@ -960,30 +985,34 @@ class TelegramBot:
         except Exception as e:
             self._send_message(chat_id, f"❌ Не сохранилось: {e}")
 
+    def _set_bot_commands(self) -> None:
+        """Register the slash-command list as Telegram quick commands (the '/'
+        menu). Single source: BOT_COMMANDS."""
+        cmds = [{"command": c, "description": d} for c, d, _g in BOT_COMMANDS]
+        try:
+            self._tg("setMyCommands", {"commands": cmds})
+            logger.info("registered %d bot commands", len(cmds))
+        except Exception as e:
+            logger.warning(f"setMyCommands failed: {e}")
+
     def _show_help(self, chat_id):
-        """Print every available slash command with a short hint."""
+        """Print every available slash command, grouped. Built from BOT_COMMANDS
+        so it never drifts from the registered quick commands."""
         ver = self._get_version()
-        text = (
-            "*🤖 Dispatch Agent — справка*\n\n"
-            "*Основные:*\n"
-            "🚀 `/start` — главное меню\n"
-            "🤖 `/claude` — запустить Claude Code в папке проекта (folder + model picker, стрим)\n"
-            "📜 `/history` — последние 10 запусков Claude Code\n"
-            "🧰 `/skills` — что включить/выключить из инструментов AI-роутера\n"
-            "🔄 `/update` — перезапустить агента, подцепит свежий код\n"
-            "❓ `/help` — это сообщение\n\n"
-            "*Деньги (Anthropic API):*\n"
-            "💰 `/spend` — текущие траты + прогресс-бар по лимиту\n"
-            "⚖️ `/setlimit 10.0` — установить лимит в долларах\n"
-            "♻️ `/resetspend` — обнулить счётчик\n\n"
-            "*Сервис:*\n"
-            "🔧 `/rescan` — найти новые установленные приложения\n\n"
-            "*Просто пиши задачу текстом* — Haiku-роутер сам поймёт что нужно: "
-            "терминал, скриншот, чтение файла, делегирование тяжёлой работы в `claude -p`, "
-            "клики мышью. Картинки распознаются через vision.\n\n"
-            f"🔖 _v {ver}_"
-        )
-        self._send_message(chat_id, text, parse_mode="Markdown")
+        groups: dict[str, list[str]] = {}
+        for cmd, desc, group in BOT_COMMANDS:
+            groups.setdefault(group, []).append(f"`/{cmd}` — {desc}")
+        lines = ["*🤖 Dispatch Agent — справка*", ""]
+        for group, items in groups.items():
+            lines.append(f"*{group}:*")
+            lines.extend(items)
+            lines.append("")
+        lines.append(
+            "*Просто пиши задачу текстом* — Haiku-роутер сам поймёт: терминал, "
+            "скриншот, чтение файла, делегирование в `claude -p`, клики мышью. "
+            "Картинки распознаются через vision.")
+        lines.append(f"\n🔖 _v {ver}_")
+        self._send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 
     # ── Callback (button) handling ──────────────────────────────────────────────
 
