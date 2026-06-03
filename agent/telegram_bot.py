@@ -26,6 +26,7 @@ from agent.orchestrator.dispatcher import Dispatcher
 from agent.orchestrator.router import classify
 from agent.orchestrator.budget import Budget, DEFAULT_DAILY_USD
 from agent.orchestrator.reviewer import SonnetReviewer, is_destructive
+from agent.orchestrator.scheduler import Scheduler, spec_is_valid
 from agent.paths import (
     DATA_DIR, STATE_PATH, CHATS_PATH, CLAUDE_TASK_PATH, CLAUDE_RUNS_PATH, INBOX_DIR,
 )
@@ -277,6 +278,10 @@ BOT_COMMANDS = [
     ("tasks",      "список задач и статусы",                        "Оркестратор"),
     ("cancel",     "отменить задачу: /cancel <id>",                 "Оркестратор"),
     ("dispatch",   "оркестратор вкл/выкл: /dispatch on|off",        "Оркестратор"),
+    ("every",      "повтор: /every 30m <задача>",                   "Расписание"),
+    ("daily",      "ежедневно: /daily 08:00 <задача>",              "Расписание"),
+    ("crons",      "список расписаний",                             "Расписание"),
+    ("uncron",     "убрать расписание: /uncron <id>",               "Расписание"),
     ("claude",     "Claude Code в папке проекта (стрим)",           "Claude Code"),
     ("history",    "последние 10 запусков Claude Code",             "Claude Code"),
     ("skills",     "включить/выключить инструменты AI",             "Claude Code"),
@@ -345,6 +350,8 @@ class TelegramBot:
         # wired in later steps; until then the dispatcher stub-completes them.
         self._dispatcher.register("qa", self._qa_executor)
         self._dispatcher.register("code", self._code_executor)
+        # Recurring tasks (P3.14): own lightweight scheduler, no extra dependency.
+        self._scheduler = Scheduler(self._queue, classify=classify)
 
     # ── State persistence (spend, active account) ───────────────────────────
 
@@ -418,6 +425,7 @@ class TelegramBot:
                                               name="AppScanScheduler")
         self._sched_thread.start()
         self._dispatcher.start()
+        self._scheduler.start()
 
     def stop(self):
         self._stop.set()
@@ -425,6 +433,10 @@ class TelegramBot:
             self._dispatcher.stop()
         except Exception as e:
             logger.warning(f"dispatcher stop failed: {e}")
+        try:
+            self._scheduler.stop()
+        except Exception as e:
+            logger.warning(f"scheduler stop failed: {e}")
 
     @property
     def status(self) -> str:
@@ -753,6 +765,16 @@ class TelegramBot:
             self._cmd_clean(chat_id)
         elif cmd == "/cancel":
             self._cmd_cancel_task(chat_id, parts[1] if len(parts) > 1 else None)
+        elif cmd == "/every":
+            # /every 30m <prompt>  |  /every 2h <prompt>
+            self._cmd_schedule(chat_id, "every", parts[1:] )
+        elif cmd == "/daily":
+            # /daily 08:00 <prompt>
+            self._cmd_schedule(chat_id, "daily", parts[1:])
+        elif cmd == "/crons":
+            self._cmd_list_crons(chat_id)
+        elif cmd == "/uncron":
+            self._cmd_uncron(chat_id, parts[1] if len(parts) > 1 else None)
         elif cmd == "/claude":
             self._claude_show_folders(chat_id)
         elif cmd == "/update":
@@ -918,6 +940,54 @@ class TelegramBot:
             except (TypeError, ValueError):
                 pass
         return out
+
+    def _cmd_schedule(self, chat_id, mode: str, parts: list):
+        """/every <N>m|h <prompt> and /daily <HH:MM> <prompt> — create a
+        recurring template (P3.14)."""
+        if len(parts) < 2:
+            ex = "/every 30m проверь почту" if mode == "every" else "/daily 08:00 пришли сводку"
+            self._send_message(chat_id, f"Использование: {ex}")
+            return
+        spec = f"{mode} {parts[0]}"
+        prompt = " ".join(parts[1:]).strip()
+        if not spec_is_valid(spec):
+            hint = ("интервал: 30m или 2h" if mode == "every" else "время: 08:00")
+            self._send_message(chat_id, f"❌ Неверный формат ({hint}).")
+            return
+        if not prompt:
+            self._send_message(chat_id, "❌ Пустая задача.")
+            return
+        tid = self._queue.enqueue(chat_id, classify(prompt), prompt, cron=spec)
+        self._scheduler.reload()
+        self._send_message(chat_id, f"📅 Расписание #{tid} создано: `{spec}` → {prompt}",
+                           parse_mode="Markdown")
+
+    def _cmd_list_crons(self, chat_id):
+        templates = self._queue.list(status="scheduled", limit=50)
+        mine = [t for t in templates if t.chat_id == chat_id]
+        if not mine:
+            self._send_message(chat_id, "Расписаний нет. Создать: /every 30m <…> или /daily 08:00 <…>")
+            return
+        lines = ["📅 Расписания:"]
+        for t in mine:
+            prompt = (t.prompt[:40] + "…") if len(t.prompt) > 40 else t.prompt
+            lines.append(f"#{t.id} `{t.cron}` — {prompt}")
+        lines.append("\nУбрать: /uncron <id>")
+        self._send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+
+    def _cmd_uncron(self, chat_id, arg: str | None):
+        try:
+            tid = int(arg)
+        except (TypeError, ValueError):
+            self._send_message(chat_id, "Использование: /uncron <id>")
+            return
+        t = self._queue.get(tid)
+        if not t or t.status != "scheduled" or t.chat_id != chat_id:
+            self._send_message(chat_id, f"Расписание #{tid} не найдено.")
+            return
+        self._queue.cancel(tid)
+        self._scheduler.reload()
+        self._send_message(chat_id, f"🗑 Расписание #{tid} убрано.")
 
     # ── Orchestrator executors (P3.10+) ──────────────────────────────────────
 
